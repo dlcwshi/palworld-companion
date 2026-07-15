@@ -12,6 +12,9 @@ cache:
   metrics_ttl: "5s"
   players_ttl: "3s"
 
+database:
+  path: "./data/companion.db"
+
 app:
   mock_mode: true
 

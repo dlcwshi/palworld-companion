@@ -23,6 +23,8 @@ make build-linux
 
 从 `deploy/config.example.yaml` 复制配置，使用文件权限保护真实用户名和密码。默认监听 `127.0.0.1:8091`。
 
+v0.2.0 开发版本需要 SQLite 写入权限。生产环境建议设置 `database.path: /var/lib/palworld-companion/companion.db`；旧配置缺少该字段时会自动使用此路径。运行用户必须能写入 `/var/lib/palworld-companion`，unit 使用 `UMask=0027` 保护数据库及 WAL 文件。数据库初始化或迁移失败时应用会停止启动，不会删除已有数据或退回内存存储。
+
 v0.1.0 没有 Companion 自身账户系统。公网使用前必须由 HTTPS 反向代理增加访问认证和速率限制，并保持 Companion 与 Palworld REST API 端口不直接暴露。部署、安装 unit 与重启服务应作为独立的明确授权任务执行。
 
 ## 2026-07-15 部署记录

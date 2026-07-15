@@ -13,6 +13,7 @@ type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Palworld PalworldConfig `yaml:"palworld"`
 	Cache    CacheConfig    `yaml:"cache"`
+	Database DatabaseConfig `yaml:"database"`
 	App      AppConfig      `yaml:"app"`
 	Logging  LoggingConfig  `yaml:"logging"`
 }
@@ -38,6 +39,9 @@ type CacheConfig struct {
 type AppConfig struct {
 	MockMode bool `yaml:"mock_mode"`
 }
+type DatabaseConfig struct {
+	Path string `yaml:"path"`
+}
 type LoggingConfig struct {
 	Level string `yaml:"level"`
 }
@@ -62,6 +66,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = "info"
+	}
+	if cfg.Database.Path == "" {
+		cfg.Database.Path = "/var/lib/palworld-companion/companion.db"
 	}
 	if cfg.Palworld.Timeout, err = durationOrDefault(cfg.Palworld.TimeoutText, 3*time.Second, "palworld.timeout"); err != nil {
 		return Config{}, err

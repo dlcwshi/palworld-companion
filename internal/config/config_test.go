@@ -23,6 +23,9 @@ func TestLoad(t *testing.T) {
 	if cfg.Cache.InfoTTL != 30*time.Second {
 		t.Fatalf("default info ttl = %s", cfg.Cache.InfoTTL)
 	}
+	if cfg.Database.Path != "/var/lib/palworld-companion/companion.db" {
+		t.Fatalf("database path=%q", cfg.Database.Path)
+	}
 }
 
 func TestLoadMissing(t *testing.T) {
