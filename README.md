@@ -8,19 +8,19 @@
 
 Palworld Companion 是自托管、手机端优先的 Palworld 玩家辅助 PWA。Go 后端通过严格的只读白名单连接 Palworld REST API，在 SQLite 中保存 Companion 自身账号和任务，并把 Vue 前端嵌入单个可执行文件。
 
-**当前仓库版本：0.3.0-dev。**不创建 v0.3.0 Tag 或正式 Release。
+**当前仓库版本：0.3.1-dev。**不创建 v0.3.1 Tag 或正式 Release。
 
 ## 当前功能
 
 - 服务器状态、核心指标与经过脱敏的在线玩家列表。
 - 首次打开强制创建本地管理员账号。
-- 管理员使用用户名和密码登录；玩家使用 SteamID64 和本地密码登录。
-- 玩家注册时必须在线进入本 Palworld 服务器，后端实时匹配 `userId == "steam_" + SteamID64`，注册后等待管理员审批。
+- 管理员使用用户名和密码登录；玩家可使用角色名或 SteamID64 和本地密码登录。
+- 玩家注册时必须在线进入本 Palworld 服务器；后端实时精确匹配唯一角色名，再从 `userId=steam_<SteamID64>` 解析并绑定身份，注册后等待管理员审批。
 - 用户审批、拒绝、禁用、软删除、恢复、角色管理、Session 撤销和密码重置。
 - 个人任务与共享任务，权限在 SQL 和 service 两层校验。
 - 移动端 PWA、SQLite WAL、纯 Go Linux AMD64 单二进制和 systemd 部署。
 
-SteamID64 只作为本服玩家身份标识。Steam OpenID 已停用，Companion 不访问 `steamcommunity.com`、Steam Web API 或外部认证代理。
+SteamID64 由服务器从在线玩家身份自动解析，并保留为兼容登录标识。Steam OpenID 已停用，Companion 不访问 `steamcommunity.com`、Steam Web API 或外部认证代理。
 
 ## 认证流程
 
@@ -33,10 +33,10 @@ SteamID64 只作为本服玩家身份标识。Steam OpenID 已停用，Companion
 ### 玩家申请
 
 1. 玩家先进入本 Palworld 服务器并保持在线。
-2. 在 `/register` 提交 SteamID64 和本地密码。
-3. 后端直接调用新鲜 `/players`，不使用状态缓存或 stale fallback。
-4. 精确匹配成功后创建 `role=player,status=pending` 的申请。
-5. 管理员批准后玩家才能登录；active 玩家后续登录不依赖 Palworld API 或当前在线状态。
+2. 在 `/register` 提交游戏内角色名和本地密码。
+3. 后端直接调用新鲜 `/players`，按区分大小写的完整角色名查找唯一在线角色，不使用状态缓存或 stale fallback。
+4. 后端严格解析匹配玩家的 `userId=steam_<SteamID64>`，成功后创建 `role=player,status=pending` 的申请。
+5. 管理员批准后玩家可使用角色名或 SteamID64 登录；active 玩家后续登录不依赖 Palworld API 或当前在线状态。
 
 pending、disabled、rejected 和 deleted 账号均不能登录。重复 SteamID64、Palworld userId 或稳定的 playerId 不能绕过现有申请状态。
 
@@ -72,7 +72,7 @@ go run ./cmd/companion --config deploy/config.example.yaml
 
 打开 <http://127.0.0.1:8091>。示例配置使用 Mock 模式和 `./data/companion.db`。
 
-配置中的 `auth.enabled`、`public_base_url`、`admin_steam_ids` 仅为旧版本兼容字段，0.3.0-dev 会读取但不会用于 Steam 认证。仍使用 `auth.session_ttl` 控制 Session 有效期。
+配置中的 `auth.enabled`、`public_base_url`、`admin_steam_ids` 仅为旧版本兼容字段，0.3.1-dev 会读取但不会用于 Steam 认证。仍使用 `auth.session_ttl` 控制 Session 有效期。
 
 ## API
 

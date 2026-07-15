@@ -150,3 +150,9 @@ a { color: inherit; text-decoration: none; }
 .filter-label { margin-bottom: 18px; }
 .reset-form { grid-column: 1 / -1; display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
 @media (max-width: 520px) { .user-card { grid-template-columns: 1fr; } .user-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.register-cta { display: grid; gap: 8px; margin: 14px 0 18px; color: var(--muted); font-size: 14px; }
+.register-cta-button { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; padding: 0 18px; border: 1px solid rgba(29,105,87,.24); border-radius: 14px; background: #e2efd9; color: var(--forest); font-size: 16px; font-weight: 800; cursor: pointer; }
+.register-cta-button:focus-visible { outline: 3px solid rgba(29,105,87,.35); outline-offset: 3px; }
+.auth-form input:focus-visible { outline: 3px solid rgba(29,105,87,.22); outline-offset: 1px; border-color: var(--forest); }
+@media (max-width: 520px) { .register-cta-button { width: 100%; } }

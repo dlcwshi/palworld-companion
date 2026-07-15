@@ -8,19 +8,19 @@
 
 Palworld Companion is a self-hosted, mobile-first PWA for Palworld players. Its Go backend accesses a strict read-only Palworld REST API allowlist, stores Companion-owned accounts and tasks in SQLite, and embeds the Vue frontend in one executable.
 
-**Current repository version: 0.3.0-dev.** This is not a v0.3.0 tag or formal release.
+**Current repository version: 0.3.1-dev.** This is not a v0.3.1 tag or formal release.
 
 ## Current capabilities
 
 - Server dashboard, metrics, and a privacy-filtered online-player list.
 - Mandatory first-run creation of a local administrator.
-- Administrator login with username/password; player login with SteamID64/local password.
-- Player applications require the character to be online on this Palworld server. The backend freshly matches `userId == "steam_" + SteamID64`, then waits for administrator approval.
+- Administrators log in with a local username/password; players can log in with a character name or SteamID64 and local password.
+- Player applications require the character to be online. The backend freshly finds one exact case-sensitive character name and parses its strict `userId=steam_<SteamID64>` identity before administrator approval.
 - Approval, rejection, disable, soft delete, restore, role management, session revocation, and password reset.
 - Personal and shared tasks with SQL- and service-level authorization.
 - Mobile-first PWA, SQLite WAL, pure-Go Linux AMD64 binary, and systemd deployment.
 
-SteamID64 is only an identity key for this server. Steam OpenID is disabled. Companion does not contact `steamcommunity.com`, the Steam Web API, or an external authentication broker.
+The server derives SteamID64 from the online player identity and keeps it as a compatible login identifier. Steam OpenID is disabled. Companion does not contact `steamcommunity.com`, the Steam Web API, or an external authentication broker.
 
 ## Authentication flow
 
@@ -33,10 +33,10 @@ Setup never reopens automatically, even if administrators later become unusable.
 ### Player application
 
 1. Join this Palworld server and remain online.
-2. Submit SteamID64 and a local password at `/register`.
-3. The backend calls a fresh `/players` result without cache or stale fallback.
-4. An exact match creates a `role=player,status=pending` application.
-5. Login is enabled after administrator approval. Existing active users can log in while offline or while the Palworld API is unavailable.
+2. Submit the in-game character name and a local password at `/register`.
+3. The backend calls a fresh `/players` result and requires one exact, case-sensitive online character-name match without cache or stale fallback.
+4. The backend strictly parses `userId=steam_<SteamID64>` from that player and creates a `role=player,status=pending` application.
+5. After administrator approval, the player can log in with the character name or SteamID64. Existing active users can log in while offline or while the Palworld API is unavailable.
 
 Pending, disabled, rejected, and deleted users cannot log in. Unique SteamID64, Palworld userId, and stable playerId constraints prevent repeated applications from bypassing state.
 

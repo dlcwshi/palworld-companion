@@ -29,6 +29,8 @@ var (
 	ErrApplicationRejected = errors.New("account application was rejected")
 	ErrAccountDeleted      = errors.New("account is deleted")
 	ErrPlayerOffline       = errors.New("player is not currently online")
+	ErrPlayerNameAmbiguous = errors.New("multiple online players have the same character name")
+	ErrPlayerIdentity      = errors.New("player identity is unavailable")
 	ErrUpstream            = errors.New("Palworld API unavailable")
 	ErrDuplicateAccount    = errors.New("an account already exists for this player")
 	ErrNotFound            = errors.New("user not found")
@@ -37,6 +39,12 @@ var (
 	ErrInvalidFlow         = errors.New("Steam OpenID login is disabled")
 	ErrAuthDisabled        = errors.New("Steam OpenID login is disabled")
 )
+
+type RegistrationInput struct {
+	CharacterName string
+	SteamID       string
+	Password      string
+}
 
 type User struct {
 	ID               int64      `json:"id"`

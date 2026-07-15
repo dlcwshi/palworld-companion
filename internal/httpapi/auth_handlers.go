@@ -20,6 +20,7 @@ type setupRequest struct {
 	ConfirmPassword string `json:"confirmPassword"`
 }
 type registerRequest struct {
+	CharacterName   string `json:"characterName"`
 	SteamID         string `json:"steamId"`
 	Password        string `json:"password"`
 	ConfirmPassword string `json:"confirmPassword"`
@@ -87,12 +88,12 @@ func (a *API) register(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "password_mismatch", "Password confirmation does not match.")
 		return
 	}
-	user, err := a.auth.Register(r.Context(), request.SteamID, request.Password)
+	user, err := a.auth.Register(r.Context(), auth.RegistrationInput{CharacterName: request.CharacterName, SteamID: request.SteamID, Password: request.Password})
 	if err != nil {
 		a.authError(w, "register player", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"status": user.Status, "message": "Registration submitted for administrator approval."})
+	writeJSON(w, http.StatusCreated, map[string]any{"status": user.Status, "message": "Registration submitted for administrator approval.", "characterName": user.CharacterName})
 }
 func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	if !a.allowSensitive(w, r, "login", 10) {
@@ -355,6 +356,10 @@ func (a *API) authError(w http.ResponseWriter, operation string, err error) {
 		writeAPIError(w, http.StatusForbidden, "account_deleted", err.Error())
 	case errors.Is(err, auth.ErrPlayerOffline):
 		writeAPIError(w, http.StatusConflict, "player_not_online", err.Error())
+	case errors.Is(err, auth.ErrPlayerNameAmbiguous):
+		writeAPIError(w, http.StatusConflict, "player_name_ambiguous", err.Error())
+	case errors.Is(err, auth.ErrPlayerIdentity):
+		writeAPIError(w, http.StatusConflict, "player_identity_unavailable", err.Error())
 	case errors.Is(err, auth.ErrUpstream):
 		writeAPIError(w, http.StatusServiceUnavailable, "palworld_unavailable", err.Error())
 	case errors.Is(err, auth.ErrDuplicateAccount):

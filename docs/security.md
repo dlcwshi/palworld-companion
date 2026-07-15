@@ -20,9 +20,9 @@ Session Token 由 `crypto/rand` 生成，原始值只进入 Secure、HttpOnly、
 
 ## 注册与身份
 
-玩家注册只接受 SteamID64 和密码。角色、状态、Palworld 标识和内部 ID 均由服务端生成，未知 JSON 字段会被拒绝。注册实时调用 `/players`，严格匹配 `userId=steam_<SteamID64>`；不可用、离线或 stale 数据不会创建申请。
+新玩家注册接受角色名和密码；为了 `/api/v1` 向后兼容，仍接受 SteamID64 和密码，但两种标识必须二选一。角色名会去除首尾空白、限制为 1–80 个 Unicode 字符并拒绝控制字符。注册实时调用 `/players`，只接受区分大小写的唯一完整角色名，禁止状态缓存、stale fallback 或持久化名册匹配。
 
-数据库对 SteamID64、Palworld userId 和非空 playerId 建立唯一索引。角色名不是身份键。所有生命周期状态保留唯一标识，软删除和拒绝不能通过重复注册绕过。
+角色名路径只从匹配玩家的严格 `userId=steam_<非零 uint64>` 解析 SteamID64，不根据 playerId 猜测身份。数据库对 SteamID64、Palworld userId 和非空 playerId 建立唯一索引；角色名不是身份键，重名登录统一失败并可改用 SteamID64。公开注册响应不返回 SteamID64、userId、playerId、accountName 或原始玩家对象。
 
 ## 管理员与任务
 

@@ -53,7 +53,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="home-page">
     <header class="hero-header">
-      <div><p class="eyebrow">SELF-HOSTED · V0.3 DEV</p><h1>Palworld<br /><em>Companion</em></h1></div>
+      <div><p class="eyebrow">SELF-HOSTED · V0.3.1 DEV</p><h1>Palworld<br /><em>Companion</em></h1></div>
       <button class="refresh-button" type="button" :disabled="store.refreshing" aria-label="刷新" @click="store.refresh"><span :class="{ spinning: store.refreshing }">↻</span></button>
     </header>
 

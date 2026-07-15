@@ -1,6 +1,6 @@
 # 架构
 
-Palworld Companion 0.3.0-dev 是单体、自托管应用。Vue PWA 嵌入纯 Go 二进制；账号、Session 和任务属于 Companion 自身 SQLite，浏览器不会接触 Palworld REST API 凭据。
+Palworld Companion 0.3.1-dev 是单体、自托管应用。Vue PWA 嵌入纯 Go 二进制；账号、Session 和任务属于 Companion 自身 SQLite，浏览器不会接触 Palworld REST API 凭据。
 
 ```mermaid
 flowchart LR
@@ -11,7 +11,7 @@ flowchart LR
     C --> E["嵌入式 Vue 静态资源"]
 ```
 
-认证流程没有外部 Steam 节点。SteamID64 是玩家提交的身份标识，只在注册时与实时 `/players` 的 `steam_<SteamID64>` 严格匹配。
+认证流程没有外部 Steam 节点。新注册按实时 `/players` 中区分大小写的完整角色名查找唯一在线角色，再严格解析 `userId=steam_<SteamID64>`；旧 `/api/v1` 客户端仍可提交 SteamID64。
 
 ## 后端模块
 
@@ -39,11 +39,11 @@ flowchart LR
 
 ## 认证与 Session
 
-初始化管理员、设置完成标志和首个 Session 在同一数据库事务中创建。用户名使用 SQLite `COLLATE NOCASE` 唯一索引；SteamID64 必须为非零 uint64 十进制字符串。
+初始化管理员、设置完成标志和首个 Session 在同一数据库事务中创建。用户名使用 SQLite `COLLATE NOCASE` 唯一索引；SteamID64 必须为非零 uint64 十进制字符串。玩家登录可使用本地唯一角色名或 SteamID64，管理员使用本地用户名。
 
 密码采用 Argon2id PHC 编码，验证使用恒定时间比较并限制编码参数，防止异常哈希触发不受控资源消耗。Session 使用 256 位随机 Token；客户端 Cookie 为 Secure、HttpOnly、SameSite=Lax、Path=/，数据库只保存 SHA-256。
 
-注册身份读取直接调用 Palworld client，不经过 `serverstatus` 缓存。注册失败时不会回退过期结果；已有 active 用户的密码登录不访问 Palworld。
+注册身份读取直接调用 Palworld client，不经过 `serverstatus` 缓存。角色名必须精确且唯一，身份必须来自严格的 `steam_<uint64>` userId；注册失败不会回退过期结果。登录只查询本地 SQLite，已有账号离线或 Palworld API 故障时仍可登录；重复角色名统一返回无效凭据并允许改用 SteamID64。
 
 ## 权限与隐私
 

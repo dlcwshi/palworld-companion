@@ -27,9 +27,9 @@ v0.2.0 开发版本需要 SQLite 写入权限。生产环境建议设置 `databa
 
 v0.1.0 没有 Companion 自身账户系统。公网使用前必须由 HTTPS 反向代理增加访问认证和速率限制，并保持 Companion 与 Palworld REST API 端口不直接暴露。部署、安装 unit 与重启服务应作为独立的明确授权任务执行。
 
-## v0.3.0-dev 本地认证部署要求
+## v0.3.1-dev 角色名注册部署要求
 
-0.3.0-dev 不依赖 Steam OpenID、Steam Web API 或外部认证代理。旧配置可以原样保留：`auth.enabled`、`public_base_url` 和 `admin_steam_ids` 会被读取但不参与认证；`auth.session_ttl` 继续生效。
+0.3.1-dev 不依赖 Steam OpenID、Steam Web API 或外部认证代理。玩家注册实时按唯一在线角色名绑定，批准后可使用角色名或 SteamID64 登录。旧配置可以原样保留：`auth.enabled`、`public_base_url` 和 `admin_steam_ids` 会被读取但不参与认证；`auth.session_ttl` 继续生效。
 
 推荐保留：
 
@@ -48,7 +48,7 @@ auth:
 - `/etc/systemd/system/palworld-companion.service`
 - `companion.db`、`companion.db-wal`、`companion.db-shm`（存在时）
 
-schema 4 保留 schema 3 的用户 ID、Session 与任务外键，新增本地密码、审批字段和持久化初始化状态。旧库存在管理员时初始化保持关闭；不存在管理员时 `setupRequired=true`。旧 Steam 用户没有 `password_hash`，不得无密码登录，需要管理员或 CLI 重置密码。
+v0.3.1-dev 继续使用 SQLite schema 4，不新增表或迁移。schema 4 保留用户 ID、Session 与任务外键；升级不得重置现有用户、Session、任务或 `setup_completed`。旧 Steam 用户没有 `password_hash` 时仍不得无密码登录，需要管理员或 CLI 重置密码。
 
 部署后验证：
 

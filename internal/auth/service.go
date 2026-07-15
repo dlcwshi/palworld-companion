@@ -71,6 +71,29 @@ func validateDisplayName(value string) error {
 	}
 	return nil
 }
+func normalizeCharacterName(value string) (string, error) {
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return "", fmt.Errorf("%w: character name must not contain control characters", ErrInvalidInput)
+		}
+	}
+	value = strings.TrimSpace(value)
+	if value == "" || utf8.RuneCountInString(value) > 80 {
+		return "", fmt.Errorf("%w: character name must contain 1-80 Unicode characters", ErrInvalidInput)
+	}
+	return value, nil
+}
+
+func steamIDFromPalworldUserID(userID string) (string, error) {
+	if !strings.HasPrefix(userID, "steam_") {
+		return "", ErrPlayerIdentity
+	}
+	steamID := strings.TrimPrefix(userID, "steam_")
+	if !isSteamID(steamID) {
+		return "", ErrPlayerIdentity
+	}
+	return steamID, nil
+}
 
 func (s *Service) SetupRequired(ctx context.Context) (bool, error) { return s.repo.SetupRequired(ctx) }
 func (s *Service) SetupAdmin(ctx context.Context, username, displayName, password string) (User, string, error) {
@@ -109,7 +132,7 @@ func (s *Service) CreateRecoveryAdmin(ctx context.Context, username, displayName
 	return s.repo.CreateRecoveryAdmin(ctx, username, strings.TrimSpace(displayName), hash, s.now().UTC())
 }
 
-func (s *Service) Register(ctx context.Context, steamID, password string) (User, error) {
+func (s *Service) Register(ctx context.Context, input RegistrationInput) (User, error) {
 	required, err := s.repo.SetupRequired(ctx)
 	if err != nil {
 		return User{}, err
@@ -117,27 +140,47 @@ func (s *Service) Register(ctx context.Context, steamID, password string) (User,
 	if required {
 		return User{}, ErrSetupRequired
 	}
-	if !isSteamID(steamID) {
-		return User{}, fmt.Errorf("%w: SteamID64 must contain decimal digits and fit uint64", ErrInvalidInput)
+	characterName := strings.TrimSpace(input.CharacterName)
+	steamID := strings.TrimSpace(input.SteamID)
+	if (characterName == "") == (steamID == "") {
+		return User{}, fmt.Errorf("%w: exactly one of characterName or steamId is required", ErrInvalidInput)
 	}
-	if err := ValidatePassword(password); err != nil {
+	if err := ValidatePassword(input.Password); err != nil {
 		return User{}, err
+	}
+	if characterName != "" {
+		characterName, err = normalizeCharacterName(input.CharacterName)
+		if err != nil {
+			return User{}, err
+		}
+	} else if !isSteamID(steamID) {
+		return User{}, fmt.Errorf("%w: SteamID64 must contain decimal digits and fit uint64", ErrInvalidInput)
 	}
 	players, err := palworld.GetPlayersFreshForIdentityBinding(ctx, s.players)
 	if err != nil {
 		return User{}, ErrUpstream
 	}
-	var match *palworld.Player
+	var matches []*palworld.Player
 	for i := range players.Players {
-		if players.Players[i].UserID == "steam_"+steamID {
-			match = &players.Players[i]
-			break
+		player := &players.Players[i]
+		if (characterName != "" && player.Name == characterName) || (steamID != "" && player.UserID == "steam_"+steamID) {
+			matches = append(matches, player)
 		}
 	}
-	if match == nil {
+	if len(matches) == 0 {
 		return User{}, ErrPlayerOffline
 	}
-	hash, err := HashPassword(password)
+	if characterName != "" && len(matches) > 1 {
+		return User{}, ErrPlayerNameAmbiguous
+	}
+	match := matches[0]
+	if characterName != "" {
+		steamID, err = steamIDFromPalworldUserID(match.UserID)
+		if err != nil {
+			return User{}, err
+		}
+	}
+	hash, err := HashPassword(input.Password)
 	if err != nil {
 		return User{}, err
 	}
@@ -290,5 +333,5 @@ func (s *Service) RevokeUserSessions(ctx context.Context, id int64) error {
 func (s *Service) Cleanup(ctx context.Context) { s.repo.Cleanup(ctx, s.now().UTC()) }
 
 func IsExpected(err error) bool {
-	return errors.Is(err, ErrAlreadyInitialized) || errors.Is(err, ErrSetupRequired) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrInvalidInput) || errors.Is(err, ErrApprovalPending) || errors.Is(err, ErrAccountDisabled) || errors.Is(err, ErrApplicationRejected) || errors.Is(err, ErrAccountDeleted) || errors.Is(err, ErrPlayerOffline) || errors.Is(err, ErrUpstream) || errors.Is(err, ErrDuplicateAccount) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrUnsafeAdminAction) || errors.Is(err, ErrInvalidPassword)
+	return errors.Is(err, ErrAlreadyInitialized) || errors.Is(err, ErrSetupRequired) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrInvalidInput) || errors.Is(err, ErrApprovalPending) || errors.Is(err, ErrAccountDisabled) || errors.Is(err, ErrApplicationRejected) || errors.Is(err, ErrAccountDeleted) || errors.Is(err, ErrPlayerOffline) || errors.Is(err, ErrPlayerNameAmbiguous) || errors.Is(err, ErrPlayerIdentity) || errors.Is(err, ErrUpstream) || errors.Is(err, ErrDuplicateAccount) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrUnsafeAdminAction) || errors.Is(err, ErrInvalidPassword)
 }

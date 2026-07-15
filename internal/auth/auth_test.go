@@ -147,7 +147,7 @@ func TestPlayerRegistrationApprovalLoginAndStates(t *testing.T) {
 	db, service := authFixture(t, client)
 	admin, _ := setupAdmin(t, service)
 	ctx := context.Background()
-	player, err := service.Register(ctx, steamID, "player-password")
+	player, err := service.Register(ctx, RegistrationInput{SteamID: steamID, Password: "player-password"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestPlayerRegistrationApprovalLoginAndStates(t *testing.T) {
 	if _, _, err := service.Login(ctx, steamID, "wrong-password"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("wrong login=%v", err)
 	}
-	if _, err := service.Register(ctx, steamID, "another-password"); !errors.Is(err, ErrUpstream) {
+	if _, err := service.Register(ctx, RegistrationInput{SteamID: steamID, Password: "another-password"}); !errors.Is(err, ErrUpstream) {
 		t.Fatalf("registration did not require fresh upstream: %v", err)
 	}
 	if err := service.SetStatus(ctx, admin.ID, player.ID, StatusDisabled); err != nil {
@@ -206,19 +206,19 @@ func TestRegistrationOfflineUpstreamDuplicateAndRejected(t *testing.T) {
 	admin, _ := setupAdmin(t, service)
 	ctx := context.Background()
 	steamID := "76561198000000001"
-	if _, err := service.Register(ctx, steamID, "player-password"); !errors.Is(err, ErrPlayerOffline) {
+	if _, err := service.Register(ctx, RegistrationInput{SteamID: steamID, Password: "player-password"}); !errors.Is(err, ErrPlayerOffline) {
 		t.Fatalf("offline=%v", err)
 	}
 	client.set(palworld.Players{}, errors.New("down"))
-	if _, err := service.Register(ctx, steamID, "player-password"); !errors.Is(err, ErrUpstream) {
+	if _, err := service.Register(ctx, RegistrationInput{SteamID: steamID, Password: "player-password"}); !errors.Is(err, ErrUpstream) {
 		t.Fatalf("upstream=%v", err)
 	}
 	client.set(palworld.Players{Players: []palworld.Player{{Name: "P", UserID: "steam_" + steamID, PlayerID: "stable"}}}, nil)
-	player, err := service.Register(ctx, steamID, "player-password")
+	player, err := service.Register(ctx, RegistrationInput{SteamID: steamID, Password: "player-password"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Register(ctx, steamID, "player-password"); !errors.Is(err, ErrDuplicateAccount) {
+	if _, err := service.Register(ctx, RegistrationInput{SteamID: steamID, Password: "player-password"}); !errors.Is(err, ErrDuplicateAccount) {
 		t.Fatalf("duplicate=%v", err)
 	}
 	if err := service.Reject(ctx, admin.ID, player.ID, "not approved"); err != nil {
@@ -290,7 +290,7 @@ func TestConcurrentRegistrationCreatesOneUser(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, err := service.Register(context.Background(), steamID, "player-password")
+			_, err := service.Register(context.Background(), RegistrationInput{SteamID: steamID, Password: "player-password"})
 			errs <- err
 		}()
 	}
@@ -311,5 +311,103 @@ func TestConcurrentRegistrationCreatesOneUser(t *testing.T) {
 	_ = db.SQL().QueryRow(`SELECT count(*) FROM users WHERE steam_id=?`, steamID).Scan(&count)
 	if success != 1 || duplicate != 1 || count != 1 {
 		t.Fatalf("success=%d duplicate=%d count=%d", success, duplicate, count)
+	}
+}
+
+func TestCharacterNameRegistrationUsesFreshUniqueOnlineIdentity(t *testing.T) {
+	steamID := "76561198000000010"
+	client := &playerClient{players: palworld.Players{Players: []palworld.Player{{Name: "????", AccountName: "steam-account", UserID: "steam_" + steamID, PlayerID: "player-10"}}}}
+	_, service := authFixture(t, client)
+	setupAdmin(t, service)
+
+	player, err := service.Register(context.Background(), RegistrationInput{CharacterName: "  ????  ", Password: "player-password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if player.Status != StatusPending || player.Role != RolePlayer || player.SteamID == nil || *player.SteamID != steamID || player.PalworldUserID == nil || *player.PalworldUserID != "steam_"+steamID || player.PalworldPlayerID == nil || *player.PalworldPlayerID != "player-10" || player.CharacterName != "????" || player.AccountName != "steam-account" || player.LastSeenAt == nil {
+		t.Fatalf("player=%+v", player)
+	}
+	if client.callCount() != 1 {
+		t.Fatalf("fresh player calls=%d", client.callCount())
+	}
+}
+
+func TestCharacterNameRegistrationFailures(t *testing.T) {
+	client := &playerClient{}
+	_, service := authFixture(t, client)
+	setupAdmin(t, service)
+	ctx := context.Background()
+	password := "player-password"
+
+	for _, input := range []RegistrationInput{
+		{Password: password},
+		{CharacterName: "Player", SteamID: "76561198000000011", Password: password},
+		{CharacterName: "bad\nname", Password: password},
+		{CharacterName: strings.Repeat("?", 81), Password: password},
+	} {
+		if _, err := service.Register(ctx, input); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("input=%+v err=%v", input, err)
+		}
+	}
+	if _, err := service.Register(ctx, RegistrationInput{CharacterName: "Offline", Password: password}); !errors.Is(err, ErrPlayerOffline) {
+		t.Fatalf("offline=%v", err)
+	}
+	client.set(palworld.Players{}, errors.New("down"))
+	if _, err := service.Register(ctx, RegistrationInput{CharacterName: "Offline", Password: password}); !errors.Is(err, ErrUpstream) {
+		t.Fatalf("upstream=%v", err)
+	}
+	client.set(palworld.Players{Players: []palworld.Player{{Name: "Twin", UserID: "steam_76561198000000012"}, {Name: "Twin", UserID: "steam_76561198000000013"}}}, nil)
+	if _, err := service.Register(ctx, RegistrationInput{CharacterName: "Twin", Password: password}); !errors.Is(err, ErrPlayerNameAmbiguous) {
+		t.Fatalf("ambiguous=%v", err)
+	}
+	for _, userID := range []string{"", "xbox_76561198000000012", "steam_", "steam_abc", "steam_0", "steam_18446744073709551616"} {
+		client.set(palworld.Players{Players: []palworld.Player{{Name: "Broken", UserID: userID}}}, nil)
+		if _, err := service.Register(ctx, RegistrationInput{CharacterName: "Broken", Password: password}); !errors.Is(err, ErrPlayerIdentity) {
+			t.Fatalf("userID=%q err=%v", userID, err)
+		}
+	}
+}
+
+func TestCharacterNameLoginIsLocalAndRejectsAmbiguity(t *testing.T) {
+	client := &playerClient{players: palworld.Players{Players: []palworld.Player{{Name: "Builder", UserID: "steam_76561198000000020", PlayerID: "player-20"}}}}
+	db, service := authFixture(t, client)
+	admin, _ := setupAdmin(t, service)
+	ctx := context.Background()
+	player, err := service.Register(ctx, RegistrationInput{CharacterName: "Builder", Password: "player-password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Approve(ctx, admin.ID, player.ID); err != nil {
+		t.Fatal(err)
+	}
+	calls := client.callCount()
+	client.set(palworld.Players{}, errors.New("down"))
+	if _, _, err := service.Login(ctx, "Builder", "player-password"); err != nil {
+		t.Fatalf("offline character login=%v", err)
+	}
+	if client.callCount() != calls {
+		t.Fatal("character login contacted Palworld")
+	}
+	if _, _, err := service.Login(ctx, "Builder", "wrong-password"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong password=%v", err)
+	}
+
+	hash, err := HashPassword("second-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	second, err := NewRepository(db.SQL()).CreatePendingPlayer(ctx, "76561198000000021", hash, "steam_76561198000000021", "player-21", "Builder", "other-account", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Approve(ctx, admin.ID, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Login(ctx, "Builder", "player-password"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("ambiguous character login=%v", err)
+	}
+	if _, _, err := service.Login(ctx, "76561198000000020", "player-password"); err != nil {
+		t.Fatalf("SteamID fallback=%v", err)
 	}
 }

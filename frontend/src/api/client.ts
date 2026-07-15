@@ -28,7 +28,7 @@ export const api = {
   auth: {
     me: () => getJSON<AuthResponse>('/api/v1/auth/me'),
     login: (account: string, password: string) => requestJSON<AuthResponse>('/api/v1/auth/login', 'POST', { account, password }),
-    register: (steamId: string, password: string, confirmPassword: string) => requestJSON<{ status: UserStatus; message: string }>('/api/v1/auth/register', 'POST', { steamId, password, confirmPassword }),
+    register: (characterName: string, password: string, confirmPassword: string) => requestJSON<{ status: UserStatus; message: string; characterName: string }>('/api/v1/auth/register', 'POST', { characterName, password, confirmPassword }),
     changePassword: (currentPassword: string, newPassword: string, confirmPassword: string) => requestJSON<void>('/api/v1/auth/change-password', 'POST', { currentPassword, newPassword, confirmPassword }),
     logout: () => requestJSON<void>('/api/v1/auth/logout', 'POST'),
   },

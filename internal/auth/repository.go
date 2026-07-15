@@ -185,6 +185,28 @@ func (r *Repository) FindByUsername(ctx context.Context, username string) (User,
 	}
 	return u, err
 }
+func (r *Repository) FindUniqueByCharacterName(ctx context.Context, characterName string) (User, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+userColumns+` FROM users WHERE character_name=? LIMIT 2`, characterName)
+	if err != nil {
+		return User{}, err
+	}
+	defer rows.Close()
+	users := make([]User, 0, 2)
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return User{}, err
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return User{}, err
+	}
+	if len(users) != 1 {
+		return User{}, ErrNotFound
+	}
+	return users[0], nil
+}
 
 func (r *Repository) CreateSession(ctx context.Context, userID int64, hash string, now, expires time.Time) error {
 	_, err := r.db.ExecContext(ctx, `INSERT INTO sessions(user_id,token_hash,created_at,expires_at,last_seen_at) VALUES(?,?,?,?,?)`, userID, hash, stamp(now), stamp(expires), stamp(now))
@@ -398,7 +420,14 @@ func (r *Repository) ResolveByIdentifier(ctx context.Context, identifier string)
 	if isSteamID(identifier) {
 		return r.FindBySteamID(ctx, identifier)
 	}
-	return r.FindByUsername(ctx, identifier)
+	user, err := r.FindByUsername(ctx, identifier)
+	if err == nil {
+		return user, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return User{}, err
+	}
+	return r.FindUniqueByCharacterName(ctx, identifier)
 }
 
 func (r *Repository) UserBySteamIDRequired(ctx context.Context, steamID string) (User, error) {
