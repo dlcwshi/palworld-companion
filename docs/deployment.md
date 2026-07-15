@@ -125,3 +125,16 @@ PWA Service Worker 的 navigation fallback 排除整个 `/api/`，不会缓存 s
 - 公网玩家对象仅包含 `name`、`level`、`ping`、`position`。部署后 Companion 日志未命中密码、Cookie、Authorization、Session token、OpenID 签名或 Steam 域名，也未发现 panic、fatal、迁移错误或外键错误；进程验收时无已建立的外部连接。
 - 本次仅停止并启动 `palworld-companion.service`。`palworld-server.service` 保持 PID `113468`、active 时间 `2026-07-15 09:35:34 UTC`；`palworld-pst.service` 保持 PID `107527`、active 时间 `2026-07-15 01:48:58 UTC`。未修改或重启 PalServer/PST，未触碰其配置、数据库或存档，未执行 `clean-seeds`，未使用 Docker，未发生回滚。
 - 自动化和浏览器测试覆盖了空库 Setup、本地登录、注册审批状态、密码与 Session、安全边界、移动端 390 像素页面和 PWA 前置链路。仍需项目所有者本人完成首任管理员初始化、使用真实在线玩家注册并在管理员页面审批，以及在实体手机上执行“安装到主屏幕”的最终点击；部署人员未创建或猜测任何真实账号、密码或身份映射。
+
+## 2026-07-15 v0.3.1-dev 角色名注册部署记录
+
+- 部署源码提交为 `b56e1f5`，版本为 `0.3.1-dev`，构建时间为 `2026-07-15T14:37:57Z`。Linux AMD64 产物大小为 `11247800` 字节，SHA-256 为 `7915984cb17cf09d0a02e33520dce8f0537de0928f1b50c021c15bb1bce716e6`。
+- 已核验产物保留在 `/tmp/palworld-companion-b56e1f5`，部署程序为 `/usr/local/bin/palworld-companion`。更新前备份位于 `/root/palworld-companion-backup-20260715-144157`，包含旧二进制、配置、unit 和停止服务后的 `companion.db`；当时 WAL/SHM 不存在。
+- `/etc/palworld-companion/config.yaml` 未修改，部署前后 SHA-256 均为 `194a975a1e55fa0be3e6d3c5f9e1a3239abbce4dff1d8302752287b7989df58e`。未修改 Nginx、FRP、防火墙、8212 或 Palworld 上游配置。
+- SQLite 保持 schema 4 和 WAL。备份库与部署后生产库均为 `users=2`、`sessions=3`、`tasks=2`、`setup_completed=true`，`PRAGMA foreign_key_check` 无违规；已有账号、会话、任务和 Setup 状态未丢失或重置。
+- Companion 服务保持 enabled、active 和 running，部署后 PID 为 `122533`，active 时间为 `2026-07-15 14:41:57 UTC`，监听仍为 `0.0.0.0:8091`。health 与 system version 均返回 `0.3.1-dev`。
+- 公网 HTTP 首页返回 301 并跳转 HTTPS；HTTPS 首页、`/login`、`/register`、health、manifest、图标和 Service Worker 均返回 200。旧 Steam 路由继续返回 HTTP 410，未认证任务接口继续返回 HTTP 401。
+- 部署静态资源为 `/assets/index-CNh61_YE.js` 与 `/assets/index-BChX2bQ3.css`，包含角色名注册字段、新错误码、48px 注册入口、16px 字号和 `focus-visible` 规则。相同源码的 390×844 浏览器验收无横向溢出或控制台错误。
+- 部署后 Companion 日志未命中密码、Cookie、Authorization、Session token、OpenID/Steam 域名或 panic、fatal、迁移、外键错误；验收结束时无 Companion 已建立连接。
+- 本次仅停止并启动 `palworld-companion.service`。`palworld-server.service` 保持 PID `113468`、active 时间 `2026-07-15 09:35:34 UTC`；`palworld-pst.service` 保持 PID `107527`、active 时间 `2026-07-15 01:48:58 UTC`。未修改或重启 PalServer/PST，未触碰配置、数据库或存档，未执行 `clean-seeds`，未使用 Docker，未发生回滚。
+- 一次失败的 tar 上传在 `/tmp/palworld-companion-linux-amd64` 留下 `11236352` 字节无效残片；该文件未用于部署，也未在缺少删除授权时清理。仍需使用真实在线角色完成角色名注册与管理员审批，并在实体手机完成“安装到主屏幕”最终点击。
