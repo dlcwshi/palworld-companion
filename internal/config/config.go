@@ -95,10 +95,9 @@ func Load(path string) (Config, error) {
 	if cfg.Auth.SessionTTL, err = durationOrDefault(cfg.Auth.SessionTTLText, 30*24*time.Hour, "auth.session_ttl"); err != nil {
 		return Config{}, err
 	}
-	if cfg.Auth.Enabled {
-		if cfg.Auth.PublicBaseURL == "" {
-			return Config{}, errors.New("auth.public_base_url is required when auth is enabled")
-		}
+	// Steam OpenID fields remain parseable for configuration compatibility but
+	// are unused by local authentication. Validate a legacy URL only when set.
+	if cfg.Auth.PublicBaseURL != "" {
 		u, parseErr := url.Parse(cfg.Auth.PublicBaseURL)
 		if parseErr != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 			return Config{}, errors.New("auth.public_base_url must be an absolute HTTPS URL")

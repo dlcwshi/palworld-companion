@@ -3,11 +3,9 @@ package auth
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,165 +14,302 @@ import (
 )
 
 type playerClient struct {
+	mu      sync.Mutex
 	players palworld.Players
 	err     error
+	calls   int
 }
 
 func (p *playerClient) GetInfo(context.Context) (palworld.Info, error) { return palworld.Info{}, p.err }
 func (p *playerClient) GetMetrics(context.Context) (palworld.Metrics, error) {
 	return palworld.Metrics{}, p.err
 }
-func (p *playerClient) GetPlayers(context.Context) (palworld.Players, error) { return p.players, p.err }
-
-type acceptVerifier struct {
-	id  string
-	err error
+func (p *playerClient) GetPlayers(context.Context) (palworld.Players, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	return p.players, p.err
 }
-
-func (v acceptVerifier) Verify(context.Context, url.Values) (string, error) { return v.id, v.err }
-
-func TestSafeReturnPathAndClaimedID(t *testing.T) {
-	for _, bad := range []string{"//evil", "https://evil.test/", "javascript:alert(1)", "/ok\r\nX: y"} {
-		if _, err := SafeReturnPath(bad); err == nil {
-			t.Fatalf("accepted %q", bad)
-		}
-	}
-	if got, err := SafeReturnPath("/tasks?scope=mine"); err != nil || got != "/tasks?scope=mine" {
-		t.Fatalf("got=%q err=%v", got, err)
-	}
-	valid := "76561198000000000"
-	if got, err := parseClaimedID("http://steamcommunity.com/openid/id/" + valid); err != nil || got != valid {
-		t.Fatalf("got=%q err=%v", got, err)
-	}
-	for _, bad := range []string{"https://evil.test/openid/id/1", "https://steamcommunity.com/other/1", "https://steamcommunity.com/openid/id/nope", "https://steamcommunity.com/openid/id/18446744073709551616"} {
-		if _, err := parseClaimedID(bad); err == nil {
-			t.Fatalf("accepted %q", bad)
-		}
-	}
+func (p *playerClient) set(players palworld.Players, err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.players = players
+	p.err = err
 }
+func (p *playerClient) callCount() int { p.mu.Lock(); defer p.mu.Unlock(); return p.calls }
 
-func TestSteamVerifierChecksProvider(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil || r.Form.Get("openid.mode") != "check_authentication" {
-			t.Fatalf("form=%v err=%v", r.Form, err)
-		}
-		_, _ = w.Write([]byte("ns:http://specs.openid.net/auth/2.0\nis_valid:true\n"))
-	}))
-	defer server.Close()
-	id := "76561198000000000"
-	values := url.Values{"openid.claimed_id": {"https://steamcommunity.com/openid/id/" + id}, "openid.identity": {"https://steamcommunity.com/openid/id/" + id}}
-	got, err := (SteamVerifier{Client: server.Client(), Endpoint: server.URL}).Verify(context.Background(), values)
-	if err != nil || got != id {
-		t.Fatalf("got=%q err=%v", got, err)
-	}
-}
-
-func callbackValues(t *testing.T, location string) (url.Values, string) {
+func authFixture(t *testing.T, client palworld.Client) (*storage.DB, *Service) {
 	t.Helper()
-	provider, err := url.Parse(location)
-	if err != nil {
-		t.Fatal(err)
-	}
-	returnTo := provider.Query().Get("openid.return_to")
-	callback, err := url.Parse(returnTo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	state := callback.Query().Get("state")
-	id := "https://steamcommunity.com/openid/id/76561198000000000"
-	return url.Values{"state": {state}, "openid.mode": {"id_res"}, "openid.return_to": {returnTo}, "openid.claimed_id": {id}, "openid.identity": {id}}, state
-}
-
-func TestRegistrationSessionReplayAndExistingOfflineLogin(t *testing.T) {
 	db, err := storage.Open(filepath.Join(t.TempDir(), "auth.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	client := &playerClient{players: palworld.Players{Players: []palworld.Player{{Name: "Builder", AccountName: "steam-account", UserID: "steam_76561198000000000", PlayerID: "player-1"}}}}
-	service := NewService(NewRepository(db.SQL()), client, acceptVerifier{id: "76561198000000000"}, true, "https://pal.example/", time.Hour, nil)
-	location, state, err := service.Begin(context.Background(), "/tasks")
+	t.Cleanup(func() { _ = db.Close() })
+	return db, NewService(NewRepository(db.SQL()), client, time.Hour)
+}
+func setupAdmin(t *testing.T, service *Service) (User, string) {
+	t.Helper()
+	user, token, err := service.SetupAdmin(context.Background(), "Owner", "Server Owner", "admin-password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	values, _ := callbackValues(t, location)
-	user, token, path, err := service.Callback(context.Background(), values, state)
+	return user, token
+}
+
+func TestPasswordArgon2id(t *testing.T) {
+	first, err := HashPassword("correct horse")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if user.CharacterName != "Builder" || user.Role != RolePlayer || token == "" || path != "/tasks" {
-		t.Fatalf("user=%+v token=%q path=%q", user, token, path)
+	second, err := HashPassword("correct horse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second || !strings.HasPrefix(first, "$argon2id$v=19$") {
+		t.Fatalf("hash format or salt reuse: %q %q", first, second)
+	}
+	ok, err := VerifyPassword("correct horse", first)
+	if err != nil || !ok {
+		t.Fatalf("verify=%v err=%v", ok, err)
+	}
+	ok, err = VerifyPassword("wrong password", first)
+	if err != nil || ok {
+		t.Fatalf("wrong verify=%v err=%v", ok, err)
+	}
+	for _, password := range []string{"", "short", strings.Repeat("x", MaxPasswordBytes+1)} {
+		if err := ValidatePassword(password); !errors.Is(err, ErrInvalidPassword) {
+			t.Fatalf("password length accepted: %d", len(password))
+		}
+	}
+}
+
+func TestInitialSetupPermanentAndConcurrent(t *testing.T) {
+	db, service := authFixture(t, &playerClient{})
+	required, err := service.SetupRequired(context.Background())
+	if err != nil || !required {
+		t.Fatalf("required=%v err=%v", required, err)
+	}
+	admin, token := setupAdmin(t, service)
+	if admin.Role != RoleAdmin || admin.Status != StatusActive || admin.Username == nil || *admin.Username != "Owner" || admin.SteamID != nil || token == "" {
+		t.Fatalf("admin=%+v token=%q", admin, token)
 	}
 	var stored string
-	if err := db.SQL().QueryRow(`SELECT token_hash FROM sessions`).Scan(&stored); err != nil || stored == token || stored != tokenHash(token) {
+	if err := db.SQL().QueryRow(`SELECT token_hash FROM sessions WHERE user_id=?`, admin.ID).Scan(&stored); err != nil || stored == token || stored != tokenHash(token) {
 		t.Fatalf("stored=%q err=%v", stored, err)
 	}
-	if _, _, _, err := service.Callback(context.Background(), values, state); !errors.Is(err, ErrInvalidFlow) {
-		t.Fatalf("replay err=%v", err)
+	if required, _ = service.SetupRequired(context.Background()); required {
+		t.Fatal("setup reopened")
 	}
-	client.err = errors.New("offline")
-	location, state, err = service.Begin(context.Background(), "/tasks")
+	if _, _, err := service.SetupAdmin(context.Background(), "Other", "", "other-password"); !errors.Is(err, ErrAlreadyInitialized) {
+		t.Fatalf("second setup=%v", err)
+	}
+	if _, err := db.SQL().Exec(`UPDATE users SET status='disabled' WHERE id=?`, admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	if required, _ = service.SetupRequired(context.Background()); required {
+		t.Fatal("setup reopened after administrator failure")
+	}
+
+	_, concurrent := authFixture(t, &playerClient{})
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, name := range []string{"AdminOne", "AdminTwo"} {
+		wg.Add(1)
+		go func(username string) {
+			defer wg.Done()
+			<-start
+			_, _, err := concurrent.SetupAdmin(context.Background(), username, "", "concurrent-password")
+			errs <- err
+		}(name)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	success, conflict := 0, 0
+	for err := range errs {
+		if err == nil {
+			success++
+		} else if errors.Is(err, ErrAlreadyInitialized) {
+			conflict++
+		} else {
+			t.Fatalf("concurrent error=%v", err)
+		}
+	}
+	if success != 1 || conflict != 1 {
+		t.Fatalf("success=%d conflict=%d", success, conflict)
+	}
+}
+
+func TestPlayerRegistrationApprovalLoginAndStates(t *testing.T) {
+	steamID := "76561198000000000"
+	client := &playerClient{players: palworld.Players{Players: []palworld.Player{{Name: "Builder", AccountName: "account", UserID: "steam_" + steamID, PlayerID: "player-1"}}}}
+	db, service := authFixture(t, client)
+	admin, _ := setupAdmin(t, service)
+	ctx := context.Background()
+	player, err := service.Register(ctx, steamID, "player-password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	values, _ = callbackValues(t, location)
-	if _, _, _, err := service.Callback(context.Background(), values, state); err != nil {
-		t.Fatalf("existing offline login: %v", err)
+	if player.Status != StatusPending || player.Role != RolePlayer || player.SteamID == nil || *player.SteamID != steamID || player.PalworldUserID == nil || *player.PalworldUserID != "steam_"+steamID {
+		t.Fatalf("player=%+v", player)
+	}
+	if _, _, err := service.Login(ctx, steamID, "player-password"); !errors.Is(err, ErrApprovalPending) {
+		t.Fatalf("pending login=%v", err)
+	}
+	if err := service.Approve(ctx, admin.ID, player.ID); err != nil {
+		t.Fatal(err)
+	}
+	calls := client.callCount()
+	client.set(palworld.Players{}, errors.New("down"))
+	logged, token, err := service.Login(ctx, steamID, "player-password")
+	if err != nil || logged.Status != StatusActive || token == "" {
+		t.Fatalf("login=%+v token=%q err=%v", logged, token, err)
+	}
+	if client.callCount() != calls {
+		t.Fatal("active login contacted Palworld")
+	}
+	if _, _, err := service.Login(ctx, steamID, "wrong-password"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong login=%v", err)
+	}
+	if _, err := service.Register(ctx, steamID, "another-password"); !errors.Is(err, ErrUpstream) {
+		t.Fatalf("registration did not require fresh upstream: %v", err)
+	}
+	if err := service.SetStatus(ctx, admin.ID, player.ID, StatusDisabled); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Login(ctx, steamID, "player-password"); !errors.Is(err, ErrAccountDisabled) {
+		t.Fatalf("disabled login=%v", err)
+	}
+	if err := service.SetStatus(ctx, admin.ID, player.ID, StatusActive); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SetStatus(ctx, admin.ID, player.ID, StatusDeleted); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Login(ctx, steamID, "player-password"); !errors.Is(err, ErrAccountDeleted) {
+		t.Fatalf("deleted login=%v", err)
+	}
+	if err := service.Restore(ctx, player.ID); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	_ = db.SQL().QueryRow(`SELECT count(*) FROM users WHERE steam_id=?`, steamID).Scan(&count)
+	if count != 1 {
+		t.Fatalf("duplicate users=%d", count)
 	}
 }
 
-func TestFirstRegistrationRequiresFreshOnlinePlayer(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		client *playerClient
-		want   error
-	}{{"offline", &playerClient{}, ErrPlayerOffline}, {"upstream", &playerClient{err: errors.New("down")}, ErrUpstream}} {
-		t.Run(tc.name, func(t *testing.T) {
-			db, _ := storage.Open(filepath.Join(t.TempDir(), "a.db"))
-			defer db.Close()
-			service := NewService(NewRepository(db.SQL()), tc.client, acceptVerifier{id: "76561198000000000"}, true, "https://pal.example/", time.Hour, nil)
-			location, state, _ := service.Begin(context.Background(), "/tasks")
-			values, _ := callbackValues(t, location)
-			if _, _, _, err := service.Callback(context.Background(), values, state); !errors.Is(err, tc.want) {
-				t.Fatalf("err=%v want=%v", err, tc.want)
-			}
-			var count int
-			_ = db.SQL().QueryRow(`SELECT count(*) FROM users`).Scan(&count)
-			if count != 0 {
-				t.Fatalf("users=%d", count)
-			}
-		})
+func TestRegistrationOfflineUpstreamDuplicateAndRejected(t *testing.T) {
+	client := &playerClient{}
+	_, service := authFixture(t, client)
+	admin, _ := setupAdmin(t, service)
+	ctx := context.Background()
+	steamID := "76561198000000001"
+	if _, err := service.Register(ctx, steamID, "player-password"); !errors.Is(err, ErrPlayerOffline) {
+		t.Fatalf("offline=%v", err)
+	}
+	client.set(palworld.Players{}, errors.New("down"))
+	if _, err := service.Register(ctx, steamID, "player-password"); !errors.Is(err, ErrUpstream) {
+		t.Fatalf("upstream=%v", err)
+	}
+	client.set(palworld.Players{Players: []palworld.Player{{Name: "P", UserID: "steam_" + steamID, PlayerID: "stable"}}}, nil)
+	player, err := service.Register(ctx, steamID, "player-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Register(ctx, steamID, "player-password"); !errors.Is(err, ErrDuplicateAccount) {
+		t.Fatalf("duplicate=%v", err)
+	}
+	if err := service.Reject(ctx, admin.ID, player.ID, "not approved"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Login(ctx, steamID, "player-password"); !errors.Is(err, ErrApplicationRejected) {
+		t.Fatalf("rejected=%v", err)
+	}
+	if err := service.Approve(ctx, admin.ID, player.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Login(ctx, steamID, "player-password"); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestDisabledUserCannotReuseSession(t *testing.T) {
-	db, _ := storage.Open(filepath.Join(t.TempDir(), "a.db"))
-	defer db.Close()
-	repo := NewRepository(db.SQL())
+func TestAdminProtectionAndPasswordSessionRevocation(t *testing.T) {
+	db, service := authFixture(t, &playerClient{})
+	admin, currentToken := setupAdmin(t, service)
+	ctx := context.Background()
+	if err := service.SetStatus(ctx, admin.ID, admin.ID, StatusDisabled); !errors.Is(err, ErrUnsafeAdminAction) {
+		t.Fatalf("self disable=%v", err)
+	}
+	if err := service.SetStatus(ctx, admin.ID, admin.ID, StatusDeleted); !errors.Is(err, ErrUnsafeAdminAction) {
+		t.Fatalf("self delete=%v", err)
+	}
+	if err := service.SetRole(ctx, admin.ID, RolePlayer); !errors.Is(err, ErrUnsafeAdminAction) {
+		t.Fatalf("last downgrade=%v", err)
+	}
+	otherToken := "other-session"
 	now := time.Now().UTC()
-	seen := now
-	u, err := repo.CreateUser(context.Background(), User{SteamID: "1", PalworldUserID: "steam_1", CharacterName: "A", Role: RolePlayer, Status: StatusActive, CreatedAt: now, UpdatedAt: now, LastLoginAt: now, LastSeenAt: &seen})
+	if err := NewRepository(db.SQL()).CreateSession(ctx, admin.ID, tokenHash(otherToken), now, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := NewRepository(db.SQL()).FindByID(ctx, admin.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	token := "secret"
-	if err := repo.CreateSession(context.Background(), u.ID, tokenHash(token), now, now.Add(time.Hour)); err != nil {
+	if err := service.ChangePassword(ctx, fresh, "admin-password", "new-admin-password", currentToken); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.SetStatus(context.Background(), 999, u.ID, StatusDisabled, now); err != nil {
+	if _, err := service.Authenticate(ctx, currentToken); err != nil {
+		t.Fatalf("current session revoked: %v", err)
+	}
+	if _, err := service.Authenticate(ctx, otherToken); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("other session active: %v", err)
+	}
+	if _, _, err := service.Login(ctx, "OWNER", "new-admin-password"); err != nil {
+		t.Fatalf("case insensitive username: %v", err)
+	}
+	if err := service.ResetPassword(ctx, admin.ID, "reset-password"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.Authenticate(context.Background(), tokenHash(token), now); !errors.Is(err, ErrUnauthenticated) {
-		t.Fatalf("err=%v", err)
+	if _, err := service.Authenticate(ctx, currentToken); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("reset retained session: %v", err)
 	}
 }
 
-func TestSteamVerifierRejectsInvalidProviderResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("is_valid:false")) }))
-	defer server.Close()
-	id := "https://steamcommunity.com/openid/id/76561198000000000"
-	_, err := (SteamVerifier{Client: server.Client(), Endpoint: server.URL}).Verify(context.Background(), url.Values{"openid.claimed_id": {id}, "openid.identity": {id}})
-	if err == nil || !strings.Contains(err.Error(), "rejected") {
-		t.Fatalf("err=%v", err)
+func TestConcurrentRegistrationCreatesOneUser(t *testing.T) {
+	steamID := "76561198000000002"
+	client := &playerClient{players: palworld.Players{Players: []palworld.Player{{Name: "Concurrent", UserID: "steam_" + steamID, PlayerID: "concurrent-player"}}}}
+	db, service := authFixture(t, client)
+	setupAdmin(t, service)
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := service.Register(context.Background(), steamID, "player-password")
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	success, duplicate := 0, 0
+	for err := range errs {
+		if err == nil {
+			success++
+		} else if errors.Is(err, ErrDuplicateAccount) {
+			duplicate++
+		} else {
+			t.Fatalf("registration=%v", err)
+		}
+	}
+	var count int
+	_ = db.SQL().QueryRow(`SELECT count(*) FROM users WHERE steam_id=?`, steamID).Scan(&count)
+	if success != 1 || duplicate != 1 || count != 1 {
+		t.Fatalf("success=%d duplicate=%d count=%d", success, duplicate, count)
 	}
 }

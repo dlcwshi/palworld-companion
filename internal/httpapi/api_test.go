@@ -1,16 +1,14 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,229 +22,216 @@ import (
 	"github.com/dlcwshi/palworld-companion/internal/tasks"
 )
 
-type mockClient struct{}
+type mockClient struct {
+	players palworld.Players
+	err     error
+}
 
-func (mockClient) GetInfo(context.Context) (palworld.Info, error) {
+func (m mockClient) GetInfo(context.Context) (palworld.Info, error) {
 	version := "mock"
-	return palworld.Info{ServerName: "Test", Version: &version}, nil
+	return palworld.Info{ServerName: "Test", Version: &version}, m.err
 }
-func (mockClient) GetMetrics(context.Context) (palworld.Metrics, error) {
-	return palworld.Metrics{ServerFPS: 57, CurrentPlayers: 4, MaxPlayers: 50}, nil
+func (m mockClient) GetMetrics(context.Context) (palworld.Metrics, error) {
+	return palworld.Metrics{ServerFPS: 57, CurrentPlayers: 1, MaxPlayers: 50}, m.err
 }
-func (mockClient) GetPlayers(context.Context) (palworld.Players, error) {
-	return palworld.Players{Players: []palworld.Player{{Name: "Safe", IP: "private", UserID: "steam_76561198000000000", PlayerID: "internal", AccountName: "private-account"}}}, nil
+func (m mockClient) GetPlayers(context.Context) (palworld.Players, error) { return m.players, m.err }
+
+type fixture struct {
+	handler http.Handler
+	db      *storage.DB
+	logs    *bytes.Buffer
 }
 
-type acceptOpenID struct{}
-
-func (acceptOpenID) Verify(context.Context, url.Values) (string, error) {
-	return "76561198000000000", nil
-}
-func testHandler(t *testing.T) http.Handler {
+func newFixture(t *testing.T, client palworld.Client) *fixture {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	status := serverstatus.New(mockClient{}, time.Minute, time.Minute, time.Minute)
 	db, err := storage.Open(filepath.Join(t.TempDir(), "api.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	taskService := tasks.NewService(tasks.NewRepository(db.SQL()))
+	logs := &bytes.Buffer{}
+	logger := slog.New(slog.NewJSONHandler(logs, nil))
+	status := serverstatus.New(client, time.Minute, time.Minute, time.Minute)
+	service := auth.NewService(auth.NewRepository(db.SQL()), client, time.Hour)
 	assets := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<!doctype html><title>Companion</title>")}}
-	return New(status, taskService, nil, BuildInfo{Name: "Palworld Companion", Version: "0.1.0"}, logger, assets)
+	return &fixture{handler: New(status, tasks.NewService(tasks.NewRepository(db.SQL())), service, BuildInfo{Name: "Palworld Companion", Version: "0.3.0-dev"}, logger, assets), db: db, logs: logs}
 }
-
-func TestHealth(t *testing.T) {
+func jsonRequest(method, path, body string) *http.Request {
+	return httptest.NewRequest(method, path, strings.NewReader(body))
+}
+func setupThroughHTTP(t *testing.T, f *fixture) (auth.User, *http.Cookie) {
+	t.Helper()
 	response := httptest.NewRecorder()
-	testHandler(t).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("status=%d", response.Code)
+	f.handler.ServeHTTP(response, jsonRequest(http.MethodPost, "/api/v1/setup/admin", `{"username":"Owner","displayName":"Owner","password":"admin-password","confirmPassword":"admin-password"}`))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("setup=%d %s", response.Code, response.Body.String())
 	}
-	var body map[string]string
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+	var payload struct {
+		User auth.User `json:"user"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if body["status"] != "ok" || body["version"] != "0.1.0" {
-		t.Fatalf("body=%v", body)
+	var cookie *http.Cookie
+	for _, item := range response.Result().Cookies() {
+		if item.Name == auth.SessionCookieName {
+			cookie = item
+		}
 	}
+	if cookie == nil {
+		t.Fatal("missing session cookie")
+	}
+	return payload.User, cookie
 }
-func TestSummaryAndPlayers(t *testing.T) {
-	for _, route := range []string{"/api/v1/server/summary", "/api/v1/server/players"} {
+
+func TestHealthPublicPlayersAndSPA(t *testing.T) {
+	client := mockClient{players: palworld.Players{Players: []palworld.Player{{Name: "Safe", IP: "private", UserID: "steam_1", PlayerID: "internal", AccountName: "private-account"}}}}
+	f := newFixture(t, client)
+	for _, route := range []string{"/api/v1/health", "/api/v1/server/summary", "/api/v1/server/players"} {
 		response := httptest.NewRecorder()
-		testHandler(t).ServeHTTP(response, httptest.NewRequest(http.MethodGet, route, nil))
+		f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, route, nil))
 		if response.Code != http.StatusOK {
-			t.Fatalf("%s status=%d", route, response.Code)
+			t.Fatalf("%s=%d", route, response.Code)
 		}
 		if strings.Contains(response.Body.String(), "private") {
-			t.Fatalf("%s leaked sensitive field: %s", route, response.Body.String())
+			t.Fatalf("sensitive player leak: %s", response.Body.String())
 		}
 	}
-}
-func TestSPAAndUnknownAPI(t *testing.T) {
-	handler := testHandler(t)
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/settings", nil))
+	f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/account", nil))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Companion") {
-		t.Fatalf("SPA response=%d %q", response.Code, response.Body.String())
-	}
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/missing", nil))
-	if response.Code != http.StatusNotFound {
-		t.Fatalf("unknown API status=%d", response.Code)
-	}
-}
-func TestTaskAPIWorkflow(t *testing.T) {
-	handler := testHandler(t)
-	create := httptest.NewRecorder()
-	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"title":"Tonight","notes":"prepare"}`)))
-	if create.Code != http.StatusServiceUnavailable {
-		t.Fatalf("create=%d %s", create.Code, create.Body.String())
-	}
-	if create.Code != http.StatusCreated {
-		return
-	}
-	var task tasks.Task
-	if err := json.Unmarshal(create.Body.Bytes(), &task); err != nil {
-		t.Fatal(err)
-	}
-	list := httptest.NewRecorder()
-	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/tasks?status=pending&limit=5", nil))
-	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"total":1`) {
-		t.Fatalf("list=%d %s", list.Code, list.Body.String())
-	}
-	patch := httptest.NewRecorder()
-	handler.ServeHTTP(patch, httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/api/v1/tasks/%d", task.ID), strings.NewReader(`{"status":"completed"}`)))
-	if patch.Code != http.StatusOK || !strings.Contains(patch.Body.String(), `"status":"completed"`) {
-		t.Fatalf("patch=%d %s", patch.Code, patch.Body.String())
-	}
-	remove := httptest.NewRecorder()
-	handler.ServeHTTP(remove, httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/tasks/%d", task.ID), nil))
-	if remove.Code != http.StatusNoContent {
-		t.Fatalf("delete=%d", remove.Code)
-	}
-}
-func TestTaskAPIErrors(t *testing.T) {
-	handler := testHandler(t)
-	for _, test := range []struct {
-		method, path, body string
-		status             int
-	}{{http.MethodPost, "/api/v1/tasks", `{"title":" "}`, http.StatusServiceUnavailable}, {http.MethodPost, "/api/v1/tasks", `{bad`, http.StatusServiceUnavailable}, {http.MethodGet, "/api/v1/tasks?status=invalid", "", http.StatusServiceUnavailable}, {http.MethodGet, "/api/v1/tasks/999", "", http.StatusServiceUnavailable}} {
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, strings.NewReader(test.body)))
-		if response.Code != test.status {
-			t.Fatalf("%s %s=%d body=%s", test.method, test.path, response.Code, response.Body.String())
-		}
+		t.Fatalf("spa=%d", response.Code)
 	}
 }
 
-func TestAuthenticatedTaskAPIAndMe(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	client := mockClient{}
-	status := serverstatus.New(client, time.Minute, time.Minute, time.Minute)
-	db, err := storage.Open(filepath.Join(t.TempDir(), "authenticated.db"))
-	if err != nil {
-		t.Fatal(err)
+func TestSetupCreatesSecureSessionAndClosesPermanently(t *testing.T) {
+	f := newFixture(t, mockClient{})
+	status := httptest.NewRecorder()
+	f.handler.ServeHTTP(status, httptest.NewRequest(http.MethodGet, "/api/v1/setup/status", nil))
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"setupRequired":true`) {
+		t.Fatalf("status=%d %s", status.Code, status.Body.String())
 	}
-	defer db.Close()
+	user, cookie := setupThroughHTTP(t, f)
+	if user.Role != auth.RoleAdmin || user.SteamID != nil {
+		t.Fatalf("user=%+v", user)
+	}
+	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/" || cookie.MaxAge != 3600 {
+		t.Fatalf("cookie=%+v", cookie)
+	}
+	var stored string
+	if err := f.db.SQL().QueryRow(`SELECT token_hash FROM sessions`).Scan(&stored); err != nil || stored == cookie.Value {
+		t.Fatalf("hash=%q err=%v", stored, err)
+	}
+	status = httptest.NewRecorder()
+	f.handler.ServeHTTP(status, httptest.NewRequest(http.MethodGet, "/api/v1/setup/status", nil))
+	if !strings.Contains(status.Body.String(), `"setupRequired":false`) {
+		t.Fatal(status.Body.String())
+	}
+	second := httptest.NewRecorder()
+	f.handler.ServeHTTP(second, jsonRequest(http.MethodPost, "/api/v1/setup/admin", `{"username":"Again","password":"another-password","confirmPassword":"another-password"}`))
+	if second.Code != http.StatusConflict || !strings.Contains(second.Body.String(), "already_initialized") {
+		t.Fatalf("second=%d %s", second.Code, second.Body.String())
+	}
+	if strings.Contains(f.logs.String(), "admin-password") || strings.Contains(f.logs.String(), cookie.Value) {
+		t.Fatalf("secret leaked to log: %s", f.logs.String())
+	}
+}
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	result, err := db.SQL().Exec(`INSERT INTO users(steam_id,palworld_user_id,character_name,role,status,created_at,updated_at,last_login_at) VALUES('76561198000000000','steam_76561198000000000','Player A','player','active',?,?,?)`, now, now, now)
-	if err != nil {
+func TestRegistrationApprovalLocalLoginAndTaskAuthentication(t *testing.T) {
+	steamID := "76561198000000000"
+	client := mockClient{players: palworld.Players{Players: []palworld.Player{{Name: "Builder", UserID: "steam_" + steamID, PlayerID: "player-1", AccountName: "account"}}}}
+	f := newFixture(t, client)
+	admin, adminCookie := setupThroughHTTP(t, f)
+	register := httptest.NewRecorder()
+	f.handler.ServeHTTP(register, jsonRequest(http.MethodPost, "/api/v1/auth/register", `{"steamId":"`+steamID+`","password":"player-password","confirmPassword":"player-password"}`))
+	if register.Code != http.StatusCreated || !strings.Contains(register.Body.String(), "pending") {
+		t.Fatalf("register=%d %s", register.Code, register.Body.String())
+	}
+	invalidFields := httptest.NewRecorder()
+	f.handler.ServeHTTP(invalidFields, jsonRequest(http.MethodPost, "/api/v1/auth/register", `{"steamId":"2","password":"password","confirmPassword":"password","role":"admin"}`))
+	if invalidFields.Code != http.StatusBadRequest {
+		t.Fatalf("privilege fields=%d", invalidFields.Code)
+	}
+	pending := httptest.NewRecorder()
+	f.handler.ServeHTTP(pending, jsonRequest(http.MethodPost, "/api/v1/auth/login", `{"account":"`+steamID+`","password":"player-password"}`))
+	if pending.Code != http.StatusForbidden || !strings.Contains(pending.Body.String(), "approval_pending") {
+		t.Fatalf("pending=%d %s", pending.Code, pending.Body.String())
+	}
+	var playerID int64
+	if err := f.db.SQL().QueryRow(`SELECT id FROM users WHERE steam_id=?`, steamID).Scan(&playerID); err != nil {
 		t.Fatal(err)
 	}
-	userID, _ := result.LastInsertId()
-	token := "test-session-token"
-	sum := sha256.Sum256([]byte(token))
-	hash := hex.EncodeToString(sum[:])
-	if _, err := db.SQL().Exec(`INSERT INTO sessions(user_id,token_hash,created_at,expires_at,last_seen_at) VALUES(?,?,?,?,?)`, userID, hash, now, time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), now); err != nil {
-		t.Fatal(err)
+	approveReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users/"+strconv64(playerID)+"/approve", nil)
+	approveReq.AddCookie(adminCookie)
+	approve := httptest.NewRecorder()
+	f.handler.ServeHTTP(approve, approveReq)
+	if approve.Code != http.StatusNoContent {
+		t.Fatalf("approve=%d %s admin=%d", approve.Code, approve.Body.String(), admin.ID)
 	}
-	authService := auth.NewService(auth.NewRepository(db.SQL()), client, auth.SteamVerifier{}, true, "https://pal.example/", time.Hour, nil)
-	handler := New(status, tasks.NewService(tasks.NewRepository(db.SQL())), authService, BuildInfo{}, logger, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
-	cookie := &http.Cookie{Name: auth.SessionCookieName, Value: token}
-	meReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
-	meReq.AddCookie(cookie)
-	me := httptest.NewRecorder()
-	handler.ServeHTTP(me, meReq)
-	if me.Code != http.StatusOK || !strings.Contains(me.Body.String(), `"authenticated":true`) {
-		t.Fatalf("me=%d %s", me.Code, me.Body.String())
+	login := httptest.NewRecorder()
+	f.handler.ServeHTTP(login, jsonRequest(http.MethodPost, "/api/v1/auth/login", `{"account":"`+steamID+`","password":"player-password"}`))
+	if login.Code != http.StatusOK {
+		t.Fatalf("login=%d %s", login.Code, login.Body.String())
 	}
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"title":"private","notes":"","visibility":"personal"}`))
-	createReq.AddCookie(cookie)
+	playerCookie := login.Result().Cookies()[0]
+	createReq := jsonRequest(http.MethodPost, "/api/v1/tasks", `{"title":"private","visibility":"personal"}`)
+	createReq.AddCookie(playerCookie)
 	created := httptest.NewRecorder()
-	handler.ServeHTTP(created, createReq)
-	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"visibility":"personal"`) {
-		t.Fatalf("created=%d %s", created.Code, created.Body.String())
+	f.handler.ServeHTTP(created, createReq)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("task=%d %s", created.Code, created.Body.String())
 	}
 	unauthorized := httptest.NewRecorder()
-	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil))
+	f.handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil))
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized=%d", unauthorized.Code)
 	}
+	playerAdminReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users/"+strconv64(admin.ID)+"/approve", nil)
+	playerAdminReq.AddCookie(playerCookie)
+	forbidden := httptest.NewRecorder()
+	f.handler.ServeHTTP(forbidden, playerAdminReq)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("player admin=%d", forbidden.Code)
+	}
+}
+func strconv64(value int64) string {
+	const digits = "0123456789"
+	if value == 0 {
+		return "0"
+	}
+	buf := make([]byte, 0, 20)
+	for value > 0 {
+		buf = append([]byte{digits[value%10]}, buf...)
+		value /= 10
+	}
+	return string(buf)
+}
 
-}
-func TestSteamRedirectCallbackAndSessionCookie(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	client := mockClient{}
-	status := serverstatus.New(client, time.Minute, time.Minute, time.Minute)
-	db, err := storage.Open(filepath.Join(t.TempDir(), "steam.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	authService := auth.NewService(auth.NewRepository(db.SQL()), client, acceptOpenID{}, true, "https://pal.example/", 2*time.Hour, nil)
-	handler := New(status, tasks.NewService(tasks.NewRepository(db.SQL())), authService, BuildInfo{}, logger, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
-	missing := httptest.NewRecorder()
-	handler.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/api/v1/auth/steam/callback", nil))
-	if missing.Code != http.StatusSeeOther {
-		t.Fatalf("missing callback=%d", missing.Code)
-	}
-	var count int
-	_ = db.SQL().QueryRow(`SELECT count(*) FROM users`).Scan(&count)
-	if count != 0 {
-		t.Fatalf("forged callback users=%d", count)
-	}
-	begin := httptest.NewRecorder()
-	handler.ServeHTTP(begin, httptest.NewRequest(http.MethodGet, "/api/v1/auth/steam?returnTo=/tasks", nil))
-	if begin.Code != http.StatusFound {
-		t.Fatalf("begin=%d %s", begin.Code, begin.Body.String())
-	}
-	provider, err := url.Parse(begin.Header().Get("Location"))
-	if err != nil || provider.Hostname() != "steamcommunity.com" {
-		t.Fatalf("provider=%v err=%v", provider, err)
-	}
-	returnTo := provider.Query().Get("openid.return_to")
-	callbackURL, _ := url.Parse(returnTo)
-	state := callbackURL.Query().Get("state")
-	var stateCookie *http.Cookie
-	for _, cookie := range begin.Result().Cookies() {
-		if cookie.Name == auth.StateCookieName {
-			stateCookie = cookie
+func TestSteamRoutesGoneWithoutProviderAccess(t *testing.T) {
+	f := newFixture(t, mockClient{err: errors.New("must not be called")})
+	for _, route := range []string{"/api/v1/auth/steam", "/api/v1/auth/steam/callback"} {
+		response := httptest.NewRecorder()
+		f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, route, nil))
+		if response.Code != http.StatusGone || !strings.Contains(response.Body.String(), "steam_auth_disabled") {
+			t.Fatalf("%s=%d %s", route, response.Code, response.Body.String())
 		}
 	}
-	if stateCookie == nil || !stateCookie.HttpOnly || !stateCookie.Secure || stateCookie.SameSite != http.SameSiteLaxMode || stateCookie.Path != "/api/v1/auth/steam/callback" {
-		t.Fatalf("state cookie=%+v", stateCookie)
-	}
-	claimed := "https://steamcommunity.com/openid/id/76561198000000000"
-	values := url.Values{"state": {state}, "openid.mode": {"id_res"}, "openid.return_to": {returnTo}, "openid.claimed_id": {claimed}, "openid.identity": {claimed}}
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/steam/callback?"+values.Encode(), nil)
-	request.AddCookie(stateCookie)
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/tasks" {
-		t.Fatalf("callback=%d location=%s body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
-	}
-	var sessionCookie *http.Cookie
-	for _, cookie := range response.Result().Cookies() {
-		if cookie.Name == auth.SessionCookieName {
-			sessionCookie = cookie
+}
+func TestLoginRateLimit(t *testing.T) {
+	f := newFixture(t, mockClient{})
+	setupThroughHTTP(t, f)
+	for i := 0; i < 11; i++ {
+		response := httptest.NewRecorder()
+		request := jsonRequest(http.MethodPost, "/api/v1/auth/login", `{"account":"missing","password":"wrong-password"}`)
+		request.RemoteAddr = "192.0.2.10:1234"
+		f.handler.ServeHTTP(response, request)
+		if i < 10 && response.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d=%d", i, response.Code)
+		}
+		if i == 10 && response.Code != http.StatusTooManyRequests {
+			t.Fatalf("rate limit=%d %s", response.Code, response.Body.String())
 		}
 	}
-	if sessionCookie == nil || !sessionCookie.HttpOnly || !sessionCookie.Secure || sessionCookie.SameSite != http.SameSiteLaxMode || sessionCookie.Path != "/" || sessionCookie.MaxAge != 7200 {
-		t.Fatalf("session cookie=%+v", sessionCookie)
-	}
-	var hash string
-	if err := db.SQL().QueryRow(`SELECT token_hash FROM sessions`).Scan(&hash); err != nil || hash == sessionCookie.Value {
-		t.Fatalf("hash=%q err=%v", hash, err)
-	}
 }
+
+var _ io.Writer = (*bytes.Buffer)(nil)

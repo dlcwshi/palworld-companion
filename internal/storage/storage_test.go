@@ -105,3 +105,65 @@ func TestRejectsFutureSchemaVersion(t *testing.T) {
 		t.Fatal("expected future schema rejection")
 	}
 }
+func TestUpgradeSchemaThreePreservesUsersSessionsAndTasks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v3.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`PRAGMA foreign_keys=ON; CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range migrations[:3] {
+		if _, err = db.Exec(item.sql); err != nil {
+			t.Fatalf("migration %d: %v", item.version, err)
+		}
+		if _, err = db.Exec(`INSERT INTO schema_migrations(version,applied_at) VALUES(?,'2026-01-01T00:00:00Z')`, item.version); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := "2026-01-01T00:00:00Z"
+	result, err := db.Exec(`INSERT INTO users(steam_id,palworld_user_id,palworld_player_id,character_name,role,status,created_at,updated_at,last_login_at) VALUES('76561198000000000','steam_76561198000000000','player-1','Legacy','admin','active',?,?,?)`, now, now, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _ := result.LastInsertId()
+	if _, err = db.Exec(`INSERT INTO sessions(user_id,token_hash,created_at,expires_at,last_seen_at) VALUES(?,'hash',?,'2099-01-01T00:00:00Z',?)`, userID, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO tasks(title,created_at,updated_at,owner_id,created_by,visibility) VALUES('kept',?,?,?,?,'personal')`, now, now, userID, userID); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var steamID, status, taskTitle, setup string
+	var password sql.NullString
+	if err = store.SQL().QueryRow(`SELECT steam_id,status,password_hash FROM users WHERE id=?`, userID).Scan(&steamID, &status, &password); err != nil {
+		t.Fatal(err)
+	}
+	if steamID != "76561198000000000" || status != "active" || password.Valid {
+		t.Fatalf("steam=%s status=%s password=%v", steamID, status, password)
+	}
+	if err = store.SQL().QueryRow(`SELECT title FROM tasks WHERE owner_id=?`, userID).Scan(&taskTitle); err != nil || taskTitle != "kept" {
+		t.Fatalf("task=%s err=%v", taskTitle, err)
+	}
+	var sessions int
+	if err = store.SQL().QueryRow(`SELECT count(*) FROM sessions WHERE user_id=?`, userID).Scan(&sessions); err != nil || sessions != 1 {
+		t.Fatalf("sessions=%d err=%v", sessions, err)
+	}
+	if err = store.SQL().QueryRow(`SELECT value FROM system_settings WHERE key='setup_completed'`).Scan(&setup); err != nil || setup != "true" {
+		t.Fatalf("setup=%q err=%v", setup, err)
+	}
+	rows, err := store.SQL().Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Fatal("foreign key violation after migration")
+	}
+}

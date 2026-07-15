@@ -11,7 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const CurrentSchemaVersion = 3
+const CurrentSchemaVersion = 4
 
 type DB struct{ sql *sql.DB }
 type migration struct {
@@ -78,6 +78,47 @@ CREATE INDEX idx_tasks_owner_id ON tasks(owner_id);
 CREATE INDEX idx_tasks_created_by ON tasks(created_by);
 CREATE INDEX idx_tasks_visibility ON tasks(visibility);
 CREATE INDEX idx_tasks_status ON tasks(status);
+`}, {version: 4, sql: `
+PRAGMA defer_foreign_keys = ON;
+CREATE TABLE users_v4 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT COLLATE NOCASE,
+    display_name TEXT NOT NULL DEFAULT '',
+    password_hash TEXT,
+    steam_id TEXT,
+    palworld_user_id TEXT,
+    palworld_player_id TEXT,
+    character_name TEXT NOT NULL DEFAULT '',
+    account_name TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT 'player' CHECK (role IN ('admin', 'player')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'disabled', 'rejected', 'deleted')),
+    previous_status TEXT CHECK (previous_status IS NULL OR previous_status IN ('pending', 'active', 'disabled', 'rejected')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_login_at TEXT,
+    last_seen_at TEXT,
+    deleted_at TEXT,
+    approved_at TEXT,
+    approved_by INTEGER REFERENCES users_v4(id),
+    rejected_at TEXT,
+    rejected_by INTEGER REFERENCES users_v4(id),
+    rejection_reason TEXT NOT NULL DEFAULT '' CHECK (length(rejection_reason) <= 500)
+);
+INSERT INTO users_v4(id,steam_id,palworld_user_id,palworld_player_id,character_name,account_name,role,status,created_at,updated_at,last_login_at,last_seen_at,deleted_at,approved_at)
+SELECT id,steam_id,palworld_user_id,NULLIF(palworld_player_id,''),character_name,account_name,role,status,created_at,updated_at,last_login_at,last_seen_at,deleted_at,CASE WHEN status='active' THEN created_at END FROM users;
+DROP TABLE users;
+ALTER TABLE users_v4 RENAME TO users;
+CREATE UNIQUE INDEX idx_users_username ON users(username COLLATE NOCASE) WHERE username IS NOT NULL;
+CREATE UNIQUE INDEX idx_users_steam_id ON users(steam_id) WHERE steam_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_users_palworld_user_id ON users(palworld_user_id) WHERE palworld_user_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_users_palworld_player_id ON users(palworld_player_id) WHERE palworld_player_id IS NOT NULL AND palworld_player_id <> '';
+CREATE TABLE system_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+INSERT INTO system_settings(key,value,updated_at)
+SELECT 'setup_completed',CASE WHEN EXISTS(SELECT 1 FROM users WHERE role='admin') THEN 'true' ELSE 'false' END,strftime('%Y-%m-%dT%H:%M:%fZ','now');
 `}}
 
 func Open(path string) (*DB, error) {
@@ -140,8 +181,20 @@ func (d *DB) initialize(ctx context.Context) error {
 		if err != sql.ErrNoRows {
 			return fmt.Errorf("check migration %d: %w", item.version, err)
 		}
+		rebuildUsers := item.version == 4
+		if rebuildUsers {
+			if _, err = d.sql.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+				return fmt.Errorf("prepare migration %d: %w", item.version, err)
+			}
+		}
+		restoreForeignKeys := func() {
+			if rebuildUsers {
+				_, _ = d.sql.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+			}
+		}
 		tx, err := d.sql.BeginTx(ctx, nil)
 		if err != nil {
+			restoreForeignKeys()
 			return fmt.Errorf("begin migration %d: %w", item.version, err)
 		}
 		if _, err = tx.ExecContext(ctx, item.sql); err == nil {
@@ -149,10 +202,24 @@ func (d *DB) initialize(ctx context.Context) error {
 		}
 		if err != nil {
 			_ = tx.Rollback()
+			restoreForeignKeys()
 			return fmt.Errorf("apply migration %d: %w", item.version, err)
 		}
-		if err := tx.Commit(); err != nil {
+		if err = tx.Commit(); err != nil {
+			restoreForeignKeys()
 			return fmt.Errorf("commit migration %d: %w", item.version, err)
+		}
+		restoreForeignKeys()
+		if rebuildUsers {
+			rows, checkErr := d.sql.QueryContext(ctx, `PRAGMA foreign_key_check`)
+			if checkErr != nil {
+				return fmt.Errorf("verify migration %d: %w", item.version, checkErr)
+			}
+			violated := rows.Next()
+			_ = rows.Close()
+			if violated {
+				return fmt.Errorf("verify migration %d: foreign key violation", item.version)
+			}
 		}
 	}
 	return nil

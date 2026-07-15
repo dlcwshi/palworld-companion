@@ -43,7 +43,7 @@ func New(cfg config.Config, build httpapi.BuildInfo, logger *slog.Logger) (*Appl
 		return nil, fmt.Errorf("initialize database: %w", err)
 	}
 	taskService := tasks.NewService(tasks.NewRepository(database.SQL()))
-	authService := auth.NewService(auth.NewRepository(database.SQL()), client, auth.SteamVerifier{}, cfg.Auth.Enabled, cfg.Auth.PublicBaseURL, cfg.Auth.SessionTTL, cfg.Auth.AdminSteamIDs)
+	authService := auth.NewService(auth.NewRepository(database.SQL()), client, cfg.Auth.SessionTTL)
 	authService.Cleanup(context.Background())
 	dist, err := fs.Sub(web.Assets, "dist")
 	if err != nil {

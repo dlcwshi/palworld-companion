@@ -24,17 +24,18 @@ type BuildInfo struct {
 	BuildTime string `json:"buildTime"`
 }
 type API struct {
-	status *serverstatus.Service
-	tasks  *tasks.Service
-	auth   *auth.Service
-	build  BuildInfo
-	log    *slog.Logger
-	assets fs.FS
-	static http.Handler
+	status  *serverstatus.Service
+	tasks   *tasks.Service
+	auth    *auth.Service
+	build   BuildInfo
+	log     *slog.Logger
+	assets  fs.FS
+	static  http.Handler
+	limiter *rateLimiter
 }
 
 func New(status *serverstatus.Service, taskService *tasks.Service, authService *auth.Service, build BuildInfo, logger *slog.Logger, assets fs.FS) http.Handler {
-	api := &API{status: status, tasks: taskService, auth: authService, build: build, log: logger, assets: assets}
+	api := &API{status: status, tasks: taskService, auth: authService, build: build, log: logger, assets: assets, limiter: newRateLimiter()}
 	if assets != nil {
 		api.static = http.FileServer(http.FS(assets))
 	}
@@ -44,11 +45,20 @@ func New(status *serverstatus.Service, taskService *tasks.Service, authService *
 	mux.HandleFunc("GET /api/v1/system/capabilities", api.capabilities)
 	mux.HandleFunc("GET /api/v1/server/summary", api.summary)
 	mux.HandleFunc("GET /api/v1/server/players", api.players)
-	mux.HandleFunc("GET /api/v1/auth/steam", api.steamLogin)
-	mux.HandleFunc("GET /api/v1/auth/steam/callback", api.steamCallback)
+	mux.HandleFunc("GET /api/v1/setup/status", api.setupStatus)
+	mux.HandleFunc("POST /api/v1/setup/admin", api.setupAdmin)
+	mux.HandleFunc("GET /api/v1/auth/steam", api.steamDisabled)
+	mux.HandleFunc("GET /api/v1/auth/steam/callback", api.steamDisabled)
+	mux.HandleFunc("POST /api/v1/auth/register", api.register)
+	mux.HandleFunc("POST /api/v1/auth/login", api.login)
+	mux.HandleFunc("POST /api/v1/auth/change-password", api.changePassword)
 	mux.HandleFunc("GET /api/v1/auth/me", api.me)
 	mux.HandleFunc("POST /api/v1/auth/logout", api.logout)
 	mux.HandleFunc("GET /api/v1/admin/users", api.adminUsers)
+	mux.HandleFunc("POST /api/v1/admin/users/{id}/approve", api.adminApprove)
+	mux.HandleFunc("POST /api/v1/admin/users/{id}/reject", api.adminReject)
+	mux.HandleFunc("POST /api/v1/admin/users/{id}/reset-password", api.adminResetPassword)
+	mux.HandleFunc("POST /api/v1/admin/users/{id}/role", api.adminSetRole)
 	mux.HandleFunc("POST /api/v1/admin/users/{id}/disable", api.adminDisable)
 	mux.HandleFunc("POST /api/v1/admin/users/{id}/enable", api.adminEnable)
 	mux.HandleFunc("DELETE /api/v1/admin/users/{id}", api.adminDelete)
@@ -68,8 +78,8 @@ func (a *API) health(w http.ResponseWriter, _ *http.Request) {
 }
 func (a *API) version(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, a.build) }
 func (a *API) capabilities(w http.ResponseWriter, _ *http.Request) {
-	enabled := a.auth != nil && a.auth.Enabled()
-	writeJSON(w, http.StatusOK, map[string]any{"palworld": map[string]bool{"info": true, "metrics": true, "players": true}, "features": map[string]bool{"crafting": false, "breeding": false, "map": false, "tasks": enabled, "steamAuth": enabled, "userAccounts": enabled, "taskOwnership": enabled, "adminUsers": enabled}})
+	enabled := a.auth != nil
+	writeJSON(w, http.StatusOK, map[string]any{"palworld": map[string]bool{"info": true, "metrics": true, "players": true}, "features": map[string]bool{"crafting": false, "breeding": false, "map": false, "tasks": enabled, "steamAuth": false, "localAuth": enabled, "initialSetup": enabled, "playerRegistration": enabled, "userAccounts": enabled, "taskOwnership": enabled, "adminUsers": enabled}})
 }
 func (a *API) summary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a.status.Summary(r.Context()))
@@ -240,6 +250,9 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+func writeAPIError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]string{"code": code, "message": message})
 }
 func secureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

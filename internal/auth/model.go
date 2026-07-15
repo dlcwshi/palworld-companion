@@ -8,48 +8,59 @@ import (
 const (
 	RoleAdmin         = "admin"
 	RolePlayer        = "player"
+	StatusPending     = "pending"
 	StatusActive      = "active"
 	StatusDisabled    = "disabled"
+	StatusRejected    = "rejected"
 	StatusDeleted     = "deleted"
 	SessionCookieName = "palworld_companion_session"
 	StateCookieName   = "palworld_companion_openid_state"
 )
 
 var (
-	ErrUnauthenticated   = errors.New("authentication required")
-	ErrForbidden         = errors.New("forbidden")
-	ErrAuthDisabled      = errors.New("Steam authentication is not configured")
-	ErrInvalidFlow       = errors.New("invalid or expired Steam login flow")
-	ErrPlayerOffline     = errors.New("请先进入本 Palworld 服务器并保持在线，然后重新使用 Steam 登录。")
-	ErrUpstream          = errors.New("Palworld API unavailable; account was not created")
-	ErrAccountDisabled   = errors.New("account is disabled")
-	ErrAccountDeleted    = errors.New("account is deleted")
-	ErrUnsafeAdminAction = errors.New("operation would disable or delete the current or last active administrator")
+	ErrUnauthenticated     = errors.New("authentication required")
+	ErrForbidden           = errors.New("forbidden")
+	ErrAlreadyInitialized  = errors.New("initial setup has already been completed")
+	ErrSetupRequired       = errors.New("initial setup is required")
+	ErrInvalidCredentials  = errors.New("invalid account or password")
+	ErrInvalidInput        = errors.New("invalid input")
+	ErrApprovalPending     = errors.New("account is waiting for administrator approval")
+	ErrAccountDisabled     = errors.New("account is disabled")
+	ErrApplicationRejected = errors.New("account application was rejected")
+	ErrAccountDeleted      = errors.New("account is deleted")
+	ErrPlayerOffline       = errors.New("player is not currently online")
+	ErrUpstream            = errors.New("Palworld API unavailable")
+	ErrDuplicateAccount    = errors.New("an account already exists for this player")
+	ErrNotFound            = errors.New("user not found")
+	ErrInvalidTransition   = errors.New("invalid account status transition")
+	ErrUnsafeAdminAction   = errors.New("operation would modify the current or last active administrator")
+	ErrInvalidFlow         = errors.New("Steam OpenID login is disabled")
+	ErrAuthDisabled        = errors.New("Steam OpenID login is disabled")
 )
 
 type User struct {
 	ID               int64      `json:"id"`
-	SteamID          string     `json:"steamId"`
-	PalworldUserID   string     `json:"-"`
-	PalworldPlayerID string     `json:"-"`
+	Username         *string    `json:"username"`
+	DisplayName      string     `json:"displayName"`
+	PasswordHash     *string    `json:"-"`
+	SteamID          *string    `json:"steamId"`
+	PalworldUserID   *string    `json:"palworldUserId"`
+	PalworldPlayerID *string    `json:"palworldPlayerId,omitempty"`
 	CharacterName    string     `json:"characterName"`
 	AccountName      string     `json:"accountName"`
 	Role             string     `json:"role"`
 	Status           string     `json:"status"`
+	PreviousStatus   *string    `json:"-"`
 	CreatedAt        time.Time  `json:"createdAt"`
-	UpdatedAt        time.Time  `json:"-"`
-	LastLoginAt      time.Time  `json:"lastLoginAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+	LastLoginAt      *time.Time `json:"lastLoginAt"`
 	LastSeenAt       *time.Time `json:"lastSeenAt"`
 	DeletedAt        *time.Time `json:"deletedAt,omitempty"`
-}
-
-type Flow struct {
-	ID         int64
-	StateHash  string
-	ReturnPath string
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	ConsumedAt *time.Time
+	ApprovedAt       *time.Time `json:"approvedAt"`
+	ApprovedBy       *int64     `json:"approvedBy"`
+	RejectedAt       *time.Time `json:"rejectedAt"`
+	RejectedBy       *int64     `json:"rejectedBy"`
+	RejectionReason  string     `json:"rejectionReason,omitempty"`
 }
 
 type Session struct {
@@ -60,4 +71,13 @@ type Session struct {
 	ExpiresAt  time.Time
 	LastSeenAt time.Time
 	RevokedAt  *time.Time
+}
+
+type Flow struct {
+	ID         int64
+	StateHash  string
+	ReturnPath string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	ConsumedAt *time.Time
 }
