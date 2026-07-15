@@ -6,60 +6,60 @@
 ![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
 
-Palworld Companion is a self-hosted, mobile-first PWA for Palworld players. Its Go backend reads the Palworld REST API through a strict read-only boundary, persists Companion-owned data, and embeds the Vue frontend in one executable.
+Palworld Companion is a self-hosted, mobile-first PWA for Palworld players. Its Go backend accesses a strict read-only Palworld REST API allowlist, stores Companion-owned accounts and tasks in SQLite, and embeds the Vue frontend in one executable.
 
-**Stable deployment: v0.1.0. Current repository: v0.2.0 in development.**
+**Current repository version: 0.3.0-dev.** This is not a v0.3.0 tag or formal release.
 
-## Current features
+## Current capabilities
 
-- Server dashboard with name, version, player count, FPS, uptime, world day, and base count.
-- Online players with name, level, latency, and two-dimensional coordinates; private identifiers never enter public responses.
-- Read-only Palworld REST API client for `/info`, `/metrics`, and `/players`.
-- Short-lived in-memory caches, stale fallback, and sanitized upstream failure responses.
-- Mobile-first layout, PWA shell, mock mode, and frontend assets embedded with Go.
-- Single-binary systemd deployment without Docker.
-- v0.2.0 development work: automatic SQLite initialization, versioned migrations, and persistent Tonight Tasks CRUD.
+- Server dashboard, metrics, and a privacy-filtered online-player list.
+- Mandatory first-run creation of a local administrator.
+- Administrator login with username/password; player login with SteamID64/local password.
+- Player applications require the character to be online on this Palworld server. The backend freshly matches `userId == "steam_" + SteamID64`, then waits for administrator approval.
+- Approval, rejection, disable, soft delete, restore, role management, session revocation, and password reset.
+- Personal and shared tasks with SQL- and service-level authorization.
+- Mobile-first PWA, SQLite WAL, pure-Go Linux AMD64 binary, and systemd deployment.
 
-## Pages and modules
+SteamID64 is only an identity key for this server. Steam OpenID is disabled. Companion does not contact `steamcommunity.com`, the Steam Web API, or an external authentication broker.
 
-- **Home:** server status, key metrics, online players, pending task count, and the five most recent pending tasks.
-- **Tonight Tasks:** create, edit, complete, reopen, delete, filter, and order tasks.
-- **Settings:** instance and security-boundary information.
-- `internal/palworld`: read-only Palworld adapter.
-- `internal/serverstatus`: aggregation and caching.
-- `internal/storage`: SQLite connection, PRAGMAs, and migrations.
-- `internal/tasks`: task model, repository, and service.
-- `internal/httpapi`: versioned APIs, security headers, and frontend hosting.
+## Authentication flow
 
-## Architecture
+### First administrator
 
-```mermaid
-flowchart LR
-    U["Mobile browser / PWA"] -->|"same-origin /api/v1"| G["Go Companion"]
-    G -->|"read-only allowlist"| P["Palworld REST API"]
-    G --> S["SQLite"]
-    G --> C["In-memory cache"]
-    G --> V["Embedded Vue frontend"]
-```
+For an empty database, or a schema 3 database with no administrator, `GET /api/v1/setup/status` returns `setupRequired=true`. The frontend routes every application page to `/setup`. Creation of the administrator, `setup_completed=true`, and its session happen in one transaction, so only one concurrent request can succeed.
 
-- Backend: Go, `net/http`, `database/sql`, `modernc.org/sqlite`, YAML, and `go:embed`
-- Frontend: Vue 3, TypeScript, Vite, Pinia, Vue Router, and PWA
-- Database: embedded SQLite with no CGo and no separate database service
-- Deployment: one Linux AMD64 executable plus systemd
+Setup never reopens automatically, even if administrators later become unusable. Recovery is available through the CLI.
 
-See [docs/architecture.md](docs/architecture.md) for more detail.
+### Player application
+
+1. Join this Palworld server and remain online.
+2. Submit SteamID64 and a local password at `/register`.
+3. The backend calls a fresh `/players` result without cache or stale fallback.
+4. An exact match creates a `role=player,status=pending` application.
+5. Login is enabled after administrator approval. Existing active users can log in while offline or while the Palworld API is unavailable.
+
+Pending, disabled, rejected, and deleted users cannot log in. Unique SteamID64, Palworld userId, and stable playerId constraints prevent repeated applications from bypassing state.
+
+## Passwords and sessions
+
+- Passwords use Argon2id with an independent random salt and upgradeable PHC parameter encoding; accepted length is 8–128 bytes.
+- Plaintext passwords are never stored, and plain SHA-256 is not used as a password hash.
+- Raw session tokens exist only in Secure, HttpOnly, SameSite=Lax, Path=/ browser cookies. SQLite stores only their SHA-256 hashes.
+- A user password change retains the current session and revokes the others. Administrator reset revokes every session of the target user.
+- Login, registration, setup, password-change, and password-reset endpoints have bounded in-process rate limiting.
+
+See [docs/security.md](docs/security.md) and [docs/architecture.md](docs/architecture.md).
+
+## Task authorization
+
+- A player cannot list or access another player's personal tasks, including by ID.
+- Shared tasks are visible to every authenticated user and editable only by their creator or an administrator.
+- Administrators can manage all tasks. Unauthorized object access returns 404.
+- Schema 4 preserves existing `owner_id`, `created_by`, and `visibility` data.
 
 ## Quick start
 
-### Development requirements
-
-- Go 1.24 or newer
-- Node.js 24 or a compatible release
-- npm
-
-MySQL, PostgreSQL, a SQLite service, the `sqlite3` CLI, and Docker are not required.
-
-### Run locally
+Go 1.24+, Node.js, and npm are required for development. Docker, CGO, an external database, and Steam services are not required.
 
 ```powershell
 cd frontend
@@ -70,167 +70,67 @@ go test ./...
 go run ./cmd/companion --config deploy/config.example.yaml
 ```
 
-Open <http://127.0.0.1:8091>. The example configuration enables mock mode and stores development data in `./data/companion.db`.
+Open <http://127.0.0.1:8091>. The example uses mock mode and `./data/companion.db`.
 
-For frontend hot reload:
+Legacy `auth.enabled`, `public_base_url`, and `admin_steam_ids` keys remain accepted but are unused. `auth.session_ttl` still controls session lifetime.
 
-```powershell
-# Terminal 1
-go run ./cmd/companion --config deploy/config.example.yaml
+## API
 
-# Terminal 2
-cd frontend
-npm.cmd run dev
-```
-
-Vite listens on <http://127.0.0.1:5173> by default and proxies `/api` to Companion.
-
-## Configuration
-
-```yaml
-server:
-  listen: "127.0.0.1:8091"
-palworld:
-  base_url: "http://127.0.0.1:8212"
-  username: ""
-  password: ""
-  timeout: "3s"
-database:
-  path: "./data/companion.db"
-app:
-  mock_mode: true
-```
-
-| Key | Default | Purpose |
-| --- | --- | --- |
-| `server.listen` | `127.0.0.1:8091` | HTTP listen address |
-| `palworld.base_url` | `http://127.0.0.1:8212` | Palworld REST API address |
-| `palworld.timeout` | `3s` | Upstream timeout |
-| `cache.info_ttl` | `30s` | Info cache lifetime |
-| `cache.metrics_ttl` | `5s` | Metrics cache lifetime |
-| `cache.players_ttl` | `3s` | Players cache lifetime |
-| `database.path` | `/var/lib/palworld-companion/companion.db` | Production default used when an older config omits this key |
-| `app.mock_mode` | `false` | Use local mock Palworld data |
-| `logging.level` | `info` | Log level |
-
-The parent database directory is created automatically. A database or migration error stops startup; Companion never silently falls back to in-memory storage and never deletes existing data.
-
-## Build
-
-```powershell
-cd frontend
-npm.cmd ci
-npm.cmd run type-check
-npm.cmd run lint
-npm.cmd run build
-cd ..
-go test ./...
-go build -o bin\palworld-companion.exe .\cmd\companion
-```
-
-Cross-compile a Linux AMD64 binary without CGo:
-
-```powershell
-$env:CGO_ENABLED = "0"
-$env:GOOS = "linux"
-$env:GOARCH = "amd64"
-go build -o bin/palworld-companion-linux-amd64 ./cmd/companion
-Remove-Item Env:CGO_ENABLED, Env:GOOS, Env:GOARCH
-```
-
-The Makefile also provides `frontend-build`, `test`, `build`, `run-mock`, and `build-linux`.
-
-## Deployment
-
-Recommended paths:
-
-- Executable: `/usr/local/bin/palworld-companion`
-- Configuration: `/etc/palworld-companion/config.yaml`
-- Database: `/var/lib/palworld-companion/companion.db`
-- Data directory: `/var/lib/palworld-companion`
-- Unit: `/etc/systemd/system/palworld-companion.service`
-
-Run the service as a dedicated unprivileged account and make only its data directory writable. The server needs the executable and YAML file, not Node.js or a database service. See [docs/deployment.md](docs/deployment.md).
-
-## Backend API
-
-Server status:
+Public and setup:
 
 - `GET /api/v1/health`
 - `GET /api/v1/system/version`
 - `GET /api/v1/system/capabilities`
 - `GET /api/v1/server/summary`
 - `GET /api/v1/server/players`
+- `GET /api/v1/setup/status`
+- `POST /api/v1/setup/admin`
 
-Tasks:
+Authentication:
 
-- `GET /api/v1/tasks?status=all&scope=visible&limit=100`
-- `POST /api/v1/tasks`
-- `GET /api/v1/tasks/{id}`
-- `PATCH /api/v1/tasks/{id}`
-- `DELETE /api/v1/tasks/{id}`
-
-Task status is restricted to `pending` and `completed`. Titles are limited to 200 characters, notes to 4,000 characters, and timestamps are stored in UTC and returned as ISO 8601.
-Authentication and administration endpoints:
-
-- `GET /api/v1/auth/steam`
-- `GET /api/v1/auth/steam/callback`
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/change-password`
 - `GET /api/v1/auth/me`
 - `POST /api/v1/auth/logout`
-- `GET /api/v1/admin/users`
+- Legacy Steam and callback routes return `410 steam_auth_disabled`
+
+Administration:
+
+- `GET /api/v1/admin/users?status=pending|active|disabled|rejected|deleted`
+- `POST /api/v1/admin/users/{id}/approve|reject|reset-password|role`
 - `POST /api/v1/admin/users/{id}/disable|enable|restore|revoke-sessions`
 - `DELETE /api/v1/admin/users/{id}` (soft delete)
 
-Task endpoints require a valid session. `scope` accepts `mine`, `shared`, and `visible`; administrators may also use `admin`.
+Tasks use `GET|POST /api/v1/tasks` and `GET|PATCH|DELETE /api/v1/tasks/{id}`.
 
+## Recovery CLI
+
+Passwords are read without echo from an interactive TTY and are never accepted as command-line arguments:
+
+```bash
+palworld-companion setup status --config /etc/palworld-companion/config.yaml
+palworld-companion users create-admin --config /etc/palworld-companion/config.yaml --username <username>
+palworld-companion users approve --config /etc/palworld-companion/config.yaml --steam-id <SteamID64>
+palworld-companion users reject --config /etc/palworld-companion/config.yaml --steam-id <SteamID64>
+palworld-companion users reset-password --config /etc/palworld-companion/config.yaml --steam-id <SteamID64>
+palworld-companion users reset-password --config /etc/palworld-companion/config.yaml --username <username>
+```
+
+Password-requiring commands fail safely without a TTY.
+
+## Database upgrade and rollback
+
+Schema 4 adds local usernames, Argon2id password hashes, approval/rejection audit fields, and persistent `system_settings.setup_completed`. Schema 3 user IDs, sessions, users, and tasks are preserved. Legacy Steam users without a password cannot log in until an administrator resets their password. Newer-than-supported schemas are rejected.
+
+Before upgrading, stop only Companion and back up the executable, configuration, database, WAL, and SHM. Migration failure rolls back and prevents startup. To roll back the binary, restore the pre-upgrade database files as well; an old executable cannot open schema 4.
+
+See [docs/deployment.md](docs/deployment.md) for the complete procedure.
 
 ## Security boundary
 
-- The backend calls only the `/info`, `/metrics`, and `/players` Palworld allowlist and is not a transparent proxy.
-- REST API credentials, player IPs, player IDs, user IDs, raw responses, and internal headers are never returned to the frontend.
-- Companion does not read or modify Palworld saves and does not depend on the PST database.
-- Real configuration, passwords, and runtime database files must not be committed.
-- Public access should add HTTPS, authentication, and rate limiting. PWA Service Workers also require a secure context.
-
-## Steam login, accounts, and task permissions
-
-- Companion uses Steam OpenID 2.0. It never stores a Steam password and does not require a Steam Web API key.
-- Before the first login, join this Palworld server and remain online. Binding uses only a fresh `/players` response and the exact rule `userId == "steam_" + SteamID64`; upstream failure, cached data, or an offline character cannot create an account.
-- After the first binding, login remains available while the character is offline or the Palworld REST API is unavailable.
-- Personal tasks are visible and manageable only by their owner and administrators. Shared tasks are visible to every signed-in player and manageable only by their creator and administrators.
-- The first user is never promoted automatically. Configure `auth.admin_steam_ids`, or run this after the owner completes the first login:
-
-```bash
-/usr/local/bin/palworld-companion users set-role \
-  --config /etc/palworld-companion/config.yaml \
-  --steam-id <SteamID64> \
-  --role admin
-```
-
-List users with:
-
-```bash
-/usr/local/bin/palworld-companion users list \
-  --config /etc/palworld-companion/config.yaml
-```
-
-Production must enable authentication explicitly:
-
-```yaml
-auth:
-  enabled: true
-  public_base_url: https://pal.gravioncloud.com
-  session_ttl: 720h
-  admin_steam_ids: []
-## Roadmap
-
-- **v0.2.0:** SQLite, Tonight Tasks, crafting material calculator, and crafting plans.
-- **Later:** breeding planner, live map, and custom markers.
-
-The first v0.2.0 batch completes SQLite and Tonight Tasks. Item data, recursive recipes, inventory deductions, and crafting plans remain unfinished.
+The backend only calls Palworld `/info`, `/metrics`, and `/players`. REST credentials, player IPs, and raw upstream payloads do not reach the frontend. Companion does not read or write saves, depend on the PST database, or modify Palworld configuration. Never commit real configuration, passwords, databases, cookies, tokens, or private player identifiers.
 
 ## License
 
-Original source code is available under the [MIT License](LICENSE). Third-party data and assets retain their own licenses; see [NOTICE](NOTICE).
-
-Palworld Companion is an unofficial community project. It is not affiliated with, authorized by, partnered with, or endorsed by Pocketpair, Inc. Palworld names, trademarks, and game content belong to their respective owners.
+Original source is licensed under the [MIT License](LICENSE). Third-party data and assets retain their own licenses; see [NOTICE](NOTICE). This project is not affiliated with or endorsed by Pocketpair, Inc.

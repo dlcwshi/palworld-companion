@@ -6,60 +6,60 @@
 ![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
 
-Palworld Companion 是一个自托管、手机端优先的 Palworld 玩家辅助 PWA。Go 后端以只读方式连接 Palworld REST API、持久化 Companion 自身业务数据，并将 Vue 前端嵌入单个可执行文件。
+Palworld Companion 是自托管、手机端优先的 Palworld 玩家辅助 PWA。Go 后端通过严格的只读白名单连接 Palworld REST API，在 SQLite 中保存 Companion 自身账号和任务，并把 Vue 前端嵌入单个可执行文件。
 
-**线上稳定版本：v0.1.0；当前仓库：v0.2.0 开发中。**
+**当前仓库版本：0.3.0-dev。**不创建 v0.3.0 Tag 或正式 Release。
 
 ## 当前功能
 
-- 服务器状态首页：名称、版本、人数、FPS、运行时间、世界天数与基地数量。
-- 在线玩家：名称、等级、延迟与二维坐标，敏感标识不会进入公共响应。
-- Palworld REST API `/info`、`/metrics`、`/players` 只读客户端。
-- 短时内存缓存、stale fallback 和不泄露上游细节的故障响应。
-- 移动端布局、PWA 应用外壳、Mock 模式和 Go 内嵌静态资源。
-- systemd 单文件部署，不依赖 Docker。
-- v0.2.0 开发内容：SQLite 自动初始化、版本化迁移和“今晚任务”持久化 CRUD。
+- 服务器状态、核心指标与经过脱敏的在线玩家列表。
+- 首次打开强制创建本地管理员账号。
+- 管理员使用用户名和密码登录；玩家使用 SteamID64 和本地密码登录。
+- 玩家注册时必须在线进入本 Palworld 服务器，后端实时匹配 `userId == "steam_" + SteamID64`，注册后等待管理员审批。
+- 用户审批、拒绝、禁用、软删除、恢复、角色管理、Session 撤销和密码重置。
+- 个人任务与共享任务，权限在 SQL 和 service 两层校验。
+- 移动端 PWA、SQLite WAL、纯 Go Linux AMD64 单二进制和 systemd 部署。
 
-## 页面与模块
+SteamID64 只作为本服玩家身份标识。Steam OpenID 已停用，Companion 不访问 `steamcommunity.com`、Steam Web API 或外部认证代理。
 
-- **首页**：服务器状态、核心指标、在线玩家、未完成任务数量和最近五条任务。
-- **今晚任务**：新建、编辑、完成、恢复、删除、筛选和排序。
-- **设置**：当前实例与安全边界说明。
-- `internal/palworld`：Palworld 只读适配器。
-- `internal/serverstatus`：状态聚合与缓存。
-- `internal/storage`：SQLite 连接、PRAGMA 和迁移。
-- `internal/tasks`：任务模型、repository 和 service。
-- `internal/httpapi`：版本化 API、安全响应头和前端托管。
+## 认证流程
 
-## 技术架构
+### 首任管理员
 
-```mermaid
-flowchart LR
-    U["手机浏览器 / PWA"] -->|"同源 /api/v1"| G["Go Companion"]
-    G -->|"只读白名单"| P["Palworld REST API"]
-    G --> S["SQLite"]
-    G --> C["内存缓存"]
-    G --> V["嵌入式 Vue 前端"]
-```
+空数据库或从 schema 3 升级且没有管理员时，`GET /api/v1/setup/status` 返回 `setupRequired=true`。前端会把所有应用页面导向 `/setup`。首任管理员填写用户名、可选显示名称和密码；创建、`setup_completed=true` 与 Session 在数据库事务中完成，并发请求只有一个能成功。
 
-- 后端：Go、`net/http`、`database/sql`、`modernc.org/sqlite`、YAML、`go:embed`
-- 前端：Vue 3、TypeScript、Vite、Pinia、Vue Router、PWA
-- 数据库：进程内 SQLite，无 CGo、无独立数据库服务
-- 部署：Linux AMD64 单二进制 + systemd
+初始化一旦完成就永久关闭，即使最后一个管理员异常也不会自动重开。恢复使用 CLI。
 
-详细设计见 [docs/architecture.md](docs/architecture.md)。
+### 玩家申请
+
+1. 玩家先进入本 Palworld 服务器并保持在线。
+2. 在 `/register` 提交 SteamID64 和本地密码。
+3. 后端直接调用新鲜 `/players`，不使用状态缓存或 stale fallback。
+4. 精确匹配成功后创建 `role=player,status=pending` 的申请。
+5. 管理员批准后玩家才能登录；active 玩家后续登录不依赖 Palworld API 或当前在线状态。
+
+pending、disabled、rejected 和 deleted 账号均不能登录。重复 SteamID64、Palworld userId 或稳定的 playerId 不能绕过现有申请状态。
+
+## 密码与 Session
+
+- 密码使用 Argon2id、每个密码独立随机盐和带参数的 PHC 编码；长度为 8–128 字节。
+- 不保存明文密码，不使用单独 SHA-256 作为密码哈希。
+- Session 原始 Token 只存浏览器 Secure、HttpOnly、SameSite=Lax、Path=/ Cookie；SQLite 只保存 Token 的 SHA-256。
+- 用户修改密码后保留当前 Session并撤销其他 Session；管理员重置密码会撤销目标用户所有 Session。
+- 登录、注册、初始化、修改密码和重置密码接口有有限容量的进程内限速。
+
+详见 [docs/security.md](docs/security.md) 与 [docs/architecture.md](docs/architecture.md)。
+
+## 任务权限
+
+- 玩家只能看到自己的个人任务，不能通过 ID 访问其他玩家的个人任务。
+- 共享任务对全部已登录用户可见，仅创建者或管理员可修改。
+- 管理员可管理全部任务；无权限访问统一返回 404。
+- schema 4 不修改 `tasks.owner_id`、`created_by` 或 `visibility`，旧任务不会丢失。
 
 ## 快速开始
 
-### 开发环境要求
-
-- Go 1.24 或更高版本
-- Node.js 24 或兼容版本
-- npm
-
-不需要 MySQL、PostgreSQL、SQLite 服务、`sqlite3` 命令行或 Docker。
-
-### 本地运行
+要求 Go 1.24+、Node.js/npm；不需要 Docker、CGO、外部数据库或 Steam 服务。
 
 ```powershell
 cd frontend
@@ -70,167 +70,70 @@ go test ./...
 go run ./cmd/companion --config deploy/config.example.yaml
 ```
 
-访问 <http://127.0.0.1:8091>。示例配置启用 Mock 模式，并把开发数据库写入 `./data/companion.db`。
+打开 <http://127.0.0.1:8091>。示例配置使用 Mock 模式和 `./data/companion.db`。
 
-前端热更新：
+配置中的 `auth.enabled`、`public_base_url`、`admin_steam_ids` 仅为旧版本兼容字段，0.3.0-dev 会读取但不会用于 Steam 认证。仍使用 `auth.session_ttl` 控制 Session 有效期。
 
-```powershell
-# 终端 1
-go run ./cmd/companion --config deploy/config.example.yaml
+## API
 
-# 终端 2
-cd frontend
-npm.cmd run dev
-```
-
-Vite 默认运行在 <http://127.0.0.1:5173>，并将 `/api` 代理到 Companion。
-
-## 配置说明
-
-```yaml
-server:
-  listen: "127.0.0.1:8091"
-palworld:
-  base_url: "http://127.0.0.1:8212"
-  username: ""
-  password: ""
-  timeout: "3s"
-database:
-  path: "./data/companion.db"
-app:
-  mock_mode: true
-```
-
-| 配置 | 默认值 | 说明 |
-| --- | --- | --- |
-| `server.listen` | `127.0.0.1:8091` | HTTP 监听地址 |
-| `palworld.base_url` | `http://127.0.0.1:8212` | Palworld REST API 地址 |
-| `palworld.timeout` | `3s` | 上游超时 |
-| `cache.info_ttl` | `30s` | info 缓存时间 |
-| `cache.metrics_ttl` | `5s` | metrics 缓存时间 |
-| `cache.players_ttl` | `3s` | players 缓存时间 |
-| `database.path` | `/var/lib/palworld-companion/companion.db` | 旧配置缺失该项时使用的生产默认路径 |
-| `app.mock_mode` | `false` | 是否使用本地 Mock Palworld 数据 |
-| `logging.level` | `info` | 日志级别 |
-
-数据库父目录会自动创建。数据库初始化或迁移失败时应用会停止启动，不会静默切换到内存存储，也不会删除已有数据。
-
-## 构建方式
-
-```powershell
-cd frontend
-npm.cmd ci
-npm.cmd run type-check
-npm.cmd run lint
-npm.cmd run build
-cd ..
-go test ./...
-go build -o bin\palworld-companion.exe .\cmd\companion
-```
-
-Linux AMD64 无 CGo 交叉构建：
-
-```powershell
-$env:CGO_ENABLED = "0"
-$env:GOOS = "linux"
-$env:GOARCH = "amd64"
-go build -o bin/palworld-companion-linux-amd64 ./cmd/companion
-Remove-Item Env:CGO_ENABLED, Env:GOOS, Env:GOARCH
-```
-
-Makefile 也提供 `frontend-build`、`test`、`build`、`run-mock` 和 `build-linux`。
-
-## 部署说明
-
-推荐路径：
-
-- 程序：`/usr/local/bin/palworld-companion`
-- 配置：`/etc/palworld-companion/config.yaml`
-- 数据库：`/var/lib/palworld-companion/companion.db`
-- 数据目录：`/var/lib/palworld-companion`
-- unit：`/etc/systemd/system/palworld-companion.service`
-
-使用独立低权限账户运行，并确保数据目录可写。服务器只需要单个二进制和 YAML 配置，不需要 Node.js 或数据库服务。完整说明见 [docs/deployment.md](docs/deployment.md)。
-
-## 后端 API
-
-状态接口：
+公共与初始化：
 
 - `GET /api/v1/health`
 - `GET /api/v1/system/version`
 - `GET /api/v1/system/capabilities`
 - `GET /api/v1/server/summary`
 - `GET /api/v1/server/players`
+- `GET /api/v1/setup/status`
+- `POST /api/v1/setup/admin`
 
-任务接口：
+认证：
 
-- `GET /api/v1/tasks?status=all&scope=visible&limit=100`
-- `POST /api/v1/tasks`
-- `GET /api/v1/tasks/{id}`
-- `PATCH /api/v1/tasks/{id}`
-- `DELETE /api/v1/tasks/{id}`
-
-任务状态仅允许 `pending` 和 `completed`。标题最长 200 个字符，备注最长 4000 个字符；时间以 UTC 存储并输出 ISO 8601。
-认证和管理员接口：
-
-- `GET /api/v1/auth/steam`
-- `GET /api/v1/auth/steam/callback`
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/change-password`
 - `GET /api/v1/auth/me`
 - `POST /api/v1/auth/logout`
-- `GET /api/v1/admin/users`
+- 旧 `GET /api/v1/auth/steam` 和 callback 固定返回 `410 steam_auth_disabled`
+
+管理员：
+
+- `GET /api/v1/admin/users?status=pending|active|disabled|rejected|deleted`
+- `POST /api/v1/admin/users/{id}/approve|reject|reset-password|role`
 - `POST /api/v1/admin/users/{id}/disable|enable|restore|revoke-sessions`
 - `DELETE /api/v1/admin/users/{id}`（软删除）
 
-任务接口要求有效 Session；`scope` 支持 `mine`、`shared`、`visible`，管理员另可使用 `admin`。
+任务：
 
+- `GET|POST /api/v1/tasks`
+- `GET|PATCH|DELETE /api/v1/tasks/{id}`
+
+## 恢复 CLI
+
+密码必须从交互式 TTY 无回显读取，不能通过命令行参数传递：
+
+```bash
+palworld-companion setup status --config /etc/palworld-companion/config.yaml
+palworld-companion users create-admin --config /etc/palworld-companion/config.yaml --username <username>
+palworld-companion users approve --config /etc/palworld-companion/config.yaml --steam-id <SteamID64>
+palworld-companion users reject --config /etc/palworld-companion/config.yaml --steam-id <SteamID64>
+palworld-companion users reset-password --config /etc/palworld-companion/config.yaml --steam-id <SteamID64>
+palworld-companion users reset-password --config /etc/palworld-companion/config.yaml --username <username>
+```
+
+无 TTY 时需要密码的命令会安全失败。
+
+## 数据库升级与回滚
+
+schema 4 增加本地用户名、Argon2id 密码哈希、审批/拒绝审计字段和持久化 `system_settings.setup_completed`。schema 3 用户、Session、任务和用户 ID 原地保留；旧 Steam 用户没有密码时不能无密码登录，管理员可为其重置密码。程序拒绝打开比自身更新的 schema。
+
+升级前停止 Companion 并备份二进制、配置、`companion.db` 及 WAL/SHM。迁移失败会回滚事务并拒绝启动。回滚程序时必须同时恢复升级前数据库文件，不能让旧二进制打开 schema 4。
+
+完整步骤见 [docs/deployment.md](docs/deployment.md)。
 
 ## 安全边界
 
-- 后端只访问 Palworld 的 `/info`、`/metrics`、`/players` 白名单只读接口，不提供透明代理。
-- 前端不会收到 REST API 凭据、玩家 IP、playerId、userId、原始响应或内部请求头。
-- Companion 不读取或修改 Palworld 存档，也不依赖 PST 数据库。
-- 真实密码、配置和运行数据库不得提交 Git。
-- 公网开放前应使用 HTTPS、访问认证和速率限制；PWA Service Worker 也要求安全上下文。
-
-## Steam 登录、账号与任务权限
-
-- Companion 使用 Steam OpenID 2.0 登录，不保存 Steam 密码，也不需要 Steam Web API Key。
-- 首次登录必须先进入本 Palworld 服务器并保持在线。后端只用实时 `/players` 中精确的 `userId == "steam_" + SteamID64` 完成绑定；上游失败、缓存数据或角色离线都不会创建账号。
-- 完成首次绑定后，即使角色离线或 Palworld REST API 暂时不可用，也可继续登录和管理任务。
-- 个人任务仅本人和管理员可见、可管理；共享任务所有登录玩家可见，仅创建者和管理员可修改。
-- 管理员不会由“首个用户”自动产生。可在 `auth.admin_steam_ids` 中配置，也可在首次登录后执行：
-
-```bash
-/usr/local/bin/palworld-companion users set-role \
-  --config /etc/palworld-companion/config.yaml \
-  --steam-id <SteamID64> \
-  --role admin
-```
-
-列出用户：
-
-```bash
-/usr/local/bin/palworld-companion users list \
-  --config /etc/palworld-companion/config.yaml
-```
-
-生产配置需显式启用：
-
-```yaml
-auth:
-  enabled: true
-  public_base_url: https://pal.gravioncloud.com
-  session_ttl: 720h
-  admin_steam_ids: []
-## 开发路线图
-
-- **v0.2.0**：SQLite、今晚任务、制作材料计算器、制作计划。
-- **后续**：配种规划器、实时地图、自定义标记。
-
-当前第一批已经完成 SQLite 与今晚任务；物品数据、配方递归、库存扣减和制作计划仍未实现。
+后端只调用 Palworld `/info`、`/metrics`、`/players`；前端不会收到 REST 凭据、玩家 IP 或原始响应。Companion 不读写存档、不依赖 PST 数据库、不修改 Palworld 配置。真实配置、密码、数据库、Cookie、Token 和玩家私密标识不得提交 Git。
 
 ## 许可证
 
-原创源代码采用 [MIT License](LICENSE)。第三方数据和素材必须分别遵守其来源许可证，详见 [NOTICE](NOTICE)。
-
-Palworld Companion 是非官方社区项目，与 Pocketpair, Inc. 无隶属、授权、合作或背书关系。Palworld、《幻兽帕鲁》名称、商标和游戏内容归各自权利人所有。
+原创源代码采用 [MIT License](LICENSE)。第三方数据和素材遵守各自许可证，见 [NOTICE](NOTICE)。本项目与 Pocketpair, Inc. 无隶属、授权或背书关系。

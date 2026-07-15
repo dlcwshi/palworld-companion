@@ -27,33 +27,51 @@ v0.2.0 开发版本需要 SQLite 写入权限。生产环境建议设置 `databa
 
 v0.1.0 没有 Companion 自身账户系统。公网使用前必须由 HTTPS 反向代理增加访问认证和速率限制，并保持 Companion 与 Palworld REST API 端口不直接暴露。部署、安装 unit 与重启服务应作为独立的明确授权任务执行。
 
-## Steam 认证版本部署要求
+## v0.3.0-dev 本地认证部署要求
 
-生产配置必须包含：
+0.3.0-dev 不依赖 Steam OpenID、Steam Web API 或外部认证代理。旧配置可以原样保留：`auth.enabled`、`public_base_url` 和 `admin_steam_ids` 会被读取但不参与认证；`auth.session_ttl` 继续生效。
+
+推荐保留：
 
 ```yaml
 auth:
-  enabled: true
-  public_base_url: https://pal.gravioncloud.com
   session_ttl: 720h
-  admin_steam_ids: []
+  enabled: true                 # deprecated, unused
+  public_base_url: https://pal.gravioncloud.com  # deprecated, unused
+  admin_steam_ids: []           # deprecated, unused
 ```
 
-Steam OpenID 回调固定为 `https://pal.gravioncloud.com/api/v1/auth/steam/callback`。首次注册使用实时 Palworld `/players` 精确匹配 `steam_<SteamID64>`；部署验收不能用伪造用户替代真人首次登录。
+升级前只停止 `palworld-companion.service`，在同一个带时间戳目录备份：
 
-升级前只停止 `palworld-companion.service`，并在同一时间戳目录备份二进制、真实配置、unit、`companion.db`、`companion.db-wal` 和 `companion.db-shm`。数据库从 schema 1 迁移到 3：版本 2 创建账号、会话和 OpenID flow，版本 3 增加任务归属与可见性；已有任务迁移为无归属共享任务。迁移失败必须保留原文件并回滚二进制和配置。
+- `/usr/local/bin/palworld-companion`
+- `/etc/palworld-companion/config.yaml`
+- `/etc/systemd/system/palworld-companion.service`
+- `companion.db`、`companion.db-wal`、`companion.db-shm`（存在时）
 
-管理员 SteamID 未确认时保持列表为空。项目所有者完成首次登录后执行：
+schema 4 保留 schema 3 的用户 ID、Session 与任务外键，新增本地密码、审批字段和持久化初始化状态。旧库存在管理员时初始化保持关闭；不存在管理员时 `setupRequired=true`。旧 Steam 用户没有 `password_hash`，不得无密码登录，需要管理员或 CLI 重置密码。
+
+部署后验证：
 
 ```bash
-/usr/local/bin/palworld-companion users set-role \
-  --config /etc/palworld-companion/config.yaml \
-  --steam-id <实际SteamID64> \
-  --role admin
+/usr/local/bin/palworld-companion setup status \
+  --config /etc/palworld-companion/config.yaml
 ```
 
-PWA Service Worker 的 navigation fallback 排除整个 `/api/`，因此不会缓存 Steam callback、`auth/me`、任务或管理员响应。
+当前无用户的生产库升级后应输出 `{"setupRequired":true}`。由项目所有者本人打开 HTTPS `/setup` 创建首任管理员；部署人员不得猜测或代设真实用户名和密码。
 
+恢复 CLI 的密码只从交互式 TTY 无回显读取：
+
+```bash
+/usr/local/bin/palworld-companion users create-admin --config /etc/palworld-companion/config.yaml --username <username>
+/usr/local/bin/palworld-companion users approve --config /etc/palworld-companion/config.yaml --steam-id <SteamID64>
+/usr/local/bin/palworld-companion users reject --config /etc/palworld-companion/config.yaml --steam-id <SteamID64>
+/usr/local/bin/palworld-companion users reset-password --config /etc/palworld-companion/config.yaml --steam-id <SteamID64>
+/usr/local/bin/palworld-companion users reset-password --config /etc/palworld-companion/config.yaml --username <username>
+```
+
+回滚时必须同时恢复旧二进制、旧配置和升级前数据库/WAL/SHM；schema 3 程序会拒绝 schema 4 数据库。迁移或启动失败时不要修改原数据库，不要让旧二进制直接打开已迁移数据库。
+
+PWA Service Worker 的 navigation fallback 排除整个 `/api/`，不会缓存 setup、登录、注册、账号、任务或管理员响应。
 ## 2026-07-15 部署记录
 
 - 目标：`192.168.3.113`，Ubuntu 24.04.4 LTS x86_64。

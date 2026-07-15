@@ -13,13 +13,14 @@ cache:
   players_ttl: "3s"
 
 database:
-auth:
-  enabled: true
-  public_base_url: "https://pal.gravioncloud.com"
-  session_ttl: "720h"
-  admin_steam_ids: []
-
   path: "./data/companion.db"
+
+auth:
+  session_ttl: "720h"
+  # Deprecated Steam OpenID fields are accepted but unused.
+  enabled: false
+  public_base_url: ""
+  admin_steam_ids: []
 
 app:
   mock_mode: true
