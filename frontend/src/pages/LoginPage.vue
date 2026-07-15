@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { APIError } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
-const route=useRoute();const auth=useAuthStore();const errors:Record<string,string>={player_offline:'请先进入本 Palworld 服务器并保持在线，然后重新使用 Steam 登录。',palworld_unavailable:'Palworld API 暂时不可用，首次注册未创建账号。',account_disabled:'账号已被禁用，请联系管理员。',account_deleted:'账号已删除，请联系管理员。',invalid_flow:'登录流程已过期或已使用，请重新开始。',steam_verification_failed:'Steam 登录验证失败，请重试。'};const error=computed(()=>typeof route.query.error==='string'?errors[route.query.error]??'登录失败，请重试。':null)
+const auth = useAuthStore(); const route = useRoute(); const router = useRouter()
+const account = ref(''); const password = ref(''); const busy = ref(false); const error = ref<string | null>(null)
+const messages: Record<string,string> = { approval_pending: '申请正在等待管理员审批。', account_disabled: '账号已被禁用，请联系管理员。', application_rejected: '注册申请已被拒绝，请联系管理员。', account_deleted: '账号已删除，请联系管理员。', invalid_credentials: '账号或密码不正确。' }
+async function submit() { busy.value = true; error.value = null; try { await auth.login(account.value, password.value); const raw = typeof route.query.returnTo === 'string' ? route.query.returnTo : '/tasks'; await router.replace(raw.startsWith('/') && !raw.startsWith('//') ? raw : '/tasks') } catch(value) { error.value = value instanceof APIError ? messages[value.code] ?? value.message : '登录失败，请重试。' } finally { busy.value = false } }
 </script>
-<template><div class="simple-page auth-page"><p class="eyebrow">STEAM ACCOUNT</p><h1>登录 Companion</h1><section class="section-block prose-card"><h2>Steam 登录即注册</h2><p>首次登录前，请先进入本 Palworld 服务器并保持角色在线。完成绑定后，后续登录不要求角色在线。</p><div v-if="error" class="notice danger">{{ error }}</div><button class="primary-button" type="button" @click="auth.login('/tasks')">使用 Steam 登录</button><small>不需要 Companion 密码，也不需要 Steam Web API Key。</small></section></div></template>
+<template><div class="simple-page auth-page"><p class="eyebrow">LOCAL ACCOUNT</p><h1>登录 Companion</h1><section class="section-block prose-card"><form class="auth-form" @submit.prevent="submit"><label>账号<input v-model.trim="account" autocomplete="username" placeholder="管理员用户名或 SteamID64" required /></label><label>密码<input v-model="password" type="password" autocomplete="current-password" maxlength="128" required /></label><div v-if="error" class="notice danger">{{ error }}</div><button class="primary-button" :disabled="busy">{{ busy ? '正在登录…' : '登录' }}</button></form><p>还没有玩家账号？<RouterLink class="text-link" to="/register">提交注册申请 →</RouterLink></p><small>登录完全由本服务器验证，不访问 Steam 社区或 Steam Web API。</small></section></div></template>

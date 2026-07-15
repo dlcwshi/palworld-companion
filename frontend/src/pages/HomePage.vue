@@ -53,7 +53,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="home-page">
     <header class="hero-header">
-      <div><p class="eyebrow">SELF-HOSTED · V0.2 DEV</p><h1>Palworld<br /><em>Companion</em></h1></div>
+      <div><p class="eyebrow">SELF-HOSTED · V0.3 DEV</p><h1>Palworld<br /><em>Companion</em></h1></div>
       <button class="refresh-button" type="button" :disabled="store.refreshing" aria-label="刷新" @click="store.refresh"><span :class="{ spinning: store.refreshing }">↻</span></button>
     </header>
 
@@ -86,7 +86,7 @@ onBeforeUnmount(() => {
         <div><p class="eyebrow">TONIGHT</p><h2>今晚任务</h2></div>
         <span class="count-pill">{{ taskStore.total }}</span>
       </div>
-      <div v-if="!auth.authenticated" class="empty-state">登录后查看个人与共享任务。<button class="secondary-button" @click="auth.login('/')">使用 Steam 登录</button></div>
+      <div v-if="!auth.authenticated" class="empty-state">登录后查看个人与共享任务。<RouterLink class="secondary-button" to="/login">登录</RouterLink></div>
       <template v-else>
         <div v-if="taskStore.error" class="notice danger">{{ taskStore.error }}</div>
         <div class="task-scope-summary"><strong>我的未完成 {{ mineTasks.length }}</strong><ul><li v-for="task in mineTasks" :key="task.id">{{ task.title }}</li></ul></div>

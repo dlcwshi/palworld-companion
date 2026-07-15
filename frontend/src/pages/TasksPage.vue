@@ -76,7 +76,7 @@ onMounted(async () => {
       <div><p class="eyebrow">TONIGHT · SQLITE</p><h1>今晚任务</h1><p>把今晚要完成的事放在这里，重启后仍会保留。</p></div>
       <button class="round-add-button" type="button" aria-label="新建任务" @click="startNew">＋</button>
     </header>
-    <section v-if="!auth.authenticated" class="prose-card"><h2>使用 Steam 登录</h2><p>首次登录前，请先进入本 Palworld 服务器并保持角色在线。</p><button class="primary-button" type="button" @click="auth.login('/tasks')">使用 Steam 登录</button></section>
+    <section v-if="!auth.authenticated" class="prose-card"><h2>请先登录</h2><p>使用管理员用户名或玩家 SteamID64 登录。</p><RouterLink class="primary-button" to="/login?returnTo=/tasks">登录</RouterLink></section>
     <template v-if="auth.authenticated">
       <div class="task-filter"><button :class="{active:scope==='mine'}" @click="setScope('mine')">我的任务</button><button :class="{active:scope==='shared'}" @click="setScope('shared')">共享任务</button></div>
 

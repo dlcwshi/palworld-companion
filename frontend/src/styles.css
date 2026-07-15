@@ -143,3 +143,10 @@ a { color: inherit; text-decoration: none; }
 .user-actions { display: grid; gap: 6px; }
 .user-actions button { min-height: 34px; border: 0; border-radius: 9px; padding: 0 10px; cursor: pointer; }
 .task-scope-summary { margin: 8px 0; padding: 10px; border-radius: 12px; background: #edf3e8; font-size: 12px; }
+.auth-form { display: grid; gap: 14px; }
+.auth-form label, .reset-form label, .filter-label { display: grid; gap: 7px; color: #52605a; font-size: 12px; font-weight: 700; }
+.auth-form input, .reset-form input, .filter-label select { width: 100%; min-height: 46px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 13px; background: white; color: var(--ink); font: inherit; }
+.notice.success { background: #ddf4d8; color: #24603f; }
+.filter-label { margin-bottom: 18px; }
+.reset-form { grid-column: 1 / -1; display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+@media (max-width: 520px) { .user-card { grid-template-columns: 1fr; } .user-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
