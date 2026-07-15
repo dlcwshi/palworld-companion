@@ -27,6 +27,33 @@ v0.2.0 开发版本需要 SQLite 写入权限。生产环境建议设置 `databa
 
 v0.1.0 没有 Companion 自身账户系统。公网使用前必须由 HTTPS 反向代理增加访问认证和速率限制，并保持 Companion 与 Palworld REST API 端口不直接暴露。部署、安装 unit 与重启服务应作为独立的明确授权任务执行。
 
+## Steam 认证版本部署要求
+
+生产配置必须包含：
+
+```yaml
+auth:
+  enabled: true
+  public_base_url: https://pal.gravioncloud.com
+  session_ttl: 720h
+  admin_steam_ids: []
+```
+
+Steam OpenID 回调固定为 `https://pal.gravioncloud.com/api/v1/auth/steam/callback`。首次注册使用实时 Palworld `/players` 精确匹配 `steam_<SteamID64>`；部署验收不能用伪造用户替代真人首次登录。
+
+升级前只停止 `palworld-companion.service`，并在同一时间戳目录备份二进制、真实配置、unit、`companion.db`、`companion.db-wal` 和 `companion.db-shm`。数据库从 schema 1 迁移到 3：版本 2 创建账号、会话和 OpenID flow，版本 3 增加任务归属与可见性；已有任务迁移为无归属共享任务。迁移失败必须保留原文件并回滚二进制和配置。
+
+管理员 SteamID 未确认时保持列表为空。项目所有者完成首次登录后执行：
+
+```bash
+/usr/local/bin/palworld-companion users set-role \
+  --config /etc/palworld-companion/config.yaml \
+  --steam-id <实际SteamID64> \
+  --role admin
+```
+
+PWA Service Worker 的 navigation fallback 排除整个 `/api/`，因此不会缓存 Steam callback、`auth/me`、任务或管理员响应。
+
 ## 2026-07-15 部署记录
 
 - 目标：`192.168.3.113`，Ubuntu 24.04.4 LTS x86_64。

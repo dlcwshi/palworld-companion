@@ -164,13 +164,25 @@ Makefile 也提供 `frontend-build`、`test`、`build`、`run-mock` 和 `build-l
 
 任务接口：
 
-- `GET /api/v1/tasks?status=all&limit=100`
+- `GET /api/v1/tasks?status=all&scope=visible&limit=100`
 - `POST /api/v1/tasks`
 - `GET /api/v1/tasks/{id}`
 - `PATCH /api/v1/tasks/{id}`
 - `DELETE /api/v1/tasks/{id}`
 
 任务状态仅允许 `pending` 和 `completed`。标题最长 200 个字符，备注最长 4000 个字符；时间以 UTC 存储并输出 ISO 8601。
+认证和管理员接口：
+
+- `GET /api/v1/auth/steam`
+- `GET /api/v1/auth/steam/callback`
+- `GET /api/v1/auth/me`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/admin/users`
+- `POST /api/v1/admin/users/{id}/disable|enable|restore|revoke-sessions`
+- `DELETE /api/v1/admin/users/{id}`（软删除）
+
+任务接口要求有效 Session；`scope` 支持 `mine`、`shared`、`visible`，管理员另可使用 `admin`。
+
 
 ## 安全边界
 
@@ -180,6 +192,36 @@ Makefile 也提供 `frontend-build`、`test`、`build`、`run-mock` 和 `build-l
 - 真实密码、配置和运行数据库不得提交 Git。
 - 公网开放前应使用 HTTPS、访问认证和速率限制；PWA Service Worker 也要求安全上下文。
 
+## Steam 登录、账号与任务权限
+
+- Companion 使用 Steam OpenID 2.0 登录，不保存 Steam 密码，也不需要 Steam Web API Key。
+- 首次登录必须先进入本 Palworld 服务器并保持在线。后端只用实时 `/players` 中精确的 `userId == "steam_" + SteamID64` 完成绑定；上游失败、缓存数据或角色离线都不会创建账号。
+- 完成首次绑定后，即使角色离线或 Palworld REST API 暂时不可用，也可继续登录和管理任务。
+- 个人任务仅本人和管理员可见、可管理；共享任务所有登录玩家可见，仅创建者和管理员可修改。
+- 管理员不会由“首个用户”自动产生。可在 `auth.admin_steam_ids` 中配置，也可在首次登录后执行：
+
+```bash
+/usr/local/bin/palworld-companion users set-role \
+  --config /etc/palworld-companion/config.yaml \
+  --steam-id <SteamID64> \
+  --role admin
+```
+
+列出用户：
+
+```bash
+/usr/local/bin/palworld-companion users list \
+  --config /etc/palworld-companion/config.yaml
+```
+
+生产配置需显式启用：
+
+```yaml
+auth:
+  enabled: true
+  public_base_url: https://pal.gravioncloud.com
+  session_ttl: 720h
+  admin_steam_ids: []
 ## 开发路线图
 
 - **v0.2.0**：SQLite、今晚任务、制作材料计算器、制作计划。

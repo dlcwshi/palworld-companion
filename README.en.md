@@ -164,13 +164,25 @@ Server status:
 
 Tasks:
 
-- `GET /api/v1/tasks?status=all&limit=100`
+- `GET /api/v1/tasks?status=all&scope=visible&limit=100`
 - `POST /api/v1/tasks`
 - `GET /api/v1/tasks/{id}`
 - `PATCH /api/v1/tasks/{id}`
 - `DELETE /api/v1/tasks/{id}`
 
 Task status is restricted to `pending` and `completed`. Titles are limited to 200 characters, notes to 4,000 characters, and timestamps are stored in UTC and returned as ISO 8601.
+Authentication and administration endpoints:
+
+- `GET /api/v1/auth/steam`
+- `GET /api/v1/auth/steam/callback`
+- `GET /api/v1/auth/me`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/admin/users`
+- `POST /api/v1/admin/users/{id}/disable|enable|restore|revoke-sessions`
+- `DELETE /api/v1/admin/users/{id}` (soft delete)
+
+Task endpoints require a valid session. `scope` accepts `mine`, `shared`, and `visible`; administrators may also use `admin`.
+
 
 ## Security boundary
 
@@ -180,6 +192,36 @@ Task status is restricted to `pending` and `completed`. Titles are limited to 20
 - Real configuration, passwords, and runtime database files must not be committed.
 - Public access should add HTTPS, authentication, and rate limiting. PWA Service Workers also require a secure context.
 
+## Steam login, accounts, and task permissions
+
+- Companion uses Steam OpenID 2.0. It never stores a Steam password and does not require a Steam Web API key.
+- Before the first login, join this Palworld server and remain online. Binding uses only a fresh `/players` response and the exact rule `userId == "steam_" + SteamID64`; upstream failure, cached data, or an offline character cannot create an account.
+- After the first binding, login remains available while the character is offline or the Palworld REST API is unavailable.
+- Personal tasks are visible and manageable only by their owner and administrators. Shared tasks are visible to every signed-in player and manageable only by their creator and administrators.
+- The first user is never promoted automatically. Configure `auth.admin_steam_ids`, or run this after the owner completes the first login:
+
+```bash
+/usr/local/bin/palworld-companion users set-role \
+  --config /etc/palworld-companion/config.yaml \
+  --steam-id <SteamID64> \
+  --role admin
+```
+
+List users with:
+
+```bash
+/usr/local/bin/palworld-companion users list \
+  --config /etc/palworld-companion/config.yaml
+```
+
+Production must enable authentication explicitly:
+
+```yaml
+auth:
+  enabled: true
+  public_base_url: https://pal.gravioncloud.com
+  session_ttl: 720h
+  admin_steam_ids: []
 ## Roadmap
 
 - **v0.2.0:** SQLite, Tonight Tasks, crafting material calculator, and crafting plans.
