@@ -11,6 +11,7 @@ export const useTaskStore = defineStore('tasks', {
     tasks: [] as Task[],
     total: 0,
     status: 'all' as TaskStatus | 'all',
+    scope: 'visible',
     loading: false,
     saving: false,
     error: null as string | null,
@@ -19,14 +20,15 @@ export const useTaskStore = defineStore('tasks', {
     pendingTasks: (state) => state.tasks.filter((task) => task.status === 'pending'),
   },
   actions: {
-    async load(status: TaskStatus | 'all' = this.status, limit = 100) {
+    async load(status: TaskStatus | 'all' = this.status, limit = 100, scope = this.scope) {
       this.loading = true
       this.error = null
       try {
-        const result = await api.tasks.list(status, limit)
+        const result = await api.tasks.list(status, limit, scope)
         this.tasks = result.tasks
         this.total = result.total
         this.status = status
+        this.scope = scope
       } catch (error) {
         this.error = message(error)
       } finally {

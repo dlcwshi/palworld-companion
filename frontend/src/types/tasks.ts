@@ -1,4 +1,5 @@
 export type TaskStatus = 'pending' | 'completed'
+export type TaskVisibility = 'personal' | 'shared'
 
 export interface Task {
   id: number
@@ -11,6 +12,9 @@ export interface Task {
   createdAt: string
   updatedAt: string
   completedAt: string | null
+	visibility: TaskVisibility
+	owner: { id:number; characterName:string; status:string } | null
+	canManage: boolean
 }
 
 export interface TaskListResponse {
@@ -18,5 +22,5 @@ export interface TaskListResponse {
   total: number
 }
 
-export interface TaskCreateInput { title: string; notes: string }
+export interface TaskCreateInput { title: string; notes: string; visibility:TaskVisibility }
 export interface TaskUpdateInput { title?: string; notes?: string; status?: TaskStatus; sortOrder?: number }

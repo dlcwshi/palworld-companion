@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import MetricCard from '@/components/MetricCard.vue'
 import PlayerList from '@/components/PlayerList.vue'
 import { useServerStore } from '@/stores/server'
 import { useTaskStore } from '@/stores/tasks'
+import { useAuthStore } from '@/stores/auth'
+import { api } from '@/api/client'
+import type { Task } from '@/types/tasks'
 
 const store = useServerStore()
 const taskStore = useTaskStore()
+const auth = useAuthStore()
+const mineTasks=ref<Task[]>([])
+const sharedTasks=ref<Task[]>([])
 let timer: number | undefined
 const server = computed(() => store.summary?.server)
 const players = computed(() => store.players?.players ?? [])
@@ -31,8 +37,8 @@ const onVisibility = () => { if (document.visibilityState === 'visible') void st
 const onOnline = () => void store.refresh()
 
 onMounted(() => {
+  void auth.refresh().then(async()=>{if(auth.authenticated){const [mine,shared]=await Promise.all([api.tasks.list('pending',5,'mine'),api.tasks.list('pending',5,'shared')]);mineTasks.value=mine.tasks;sharedTasks.value=shared.tasks;void taskStore.load('pending',5,'visible')}})
   void store.refresh()
-	void taskStore.load('pending', 5)
   timer = window.setInterval(() => { if (document.visibilityState === 'visible') void store.refresh() }, 5000)
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('online', onOnline)
@@ -80,16 +86,21 @@ onBeforeUnmount(() => {
         <div><p class="eyebrow">TONIGHT</p><h2>今晚任务</h2></div>
         <span class="count-pill">{{ taskStore.total }}</span>
       </div>
-      <div v-if="taskStore.error" class="notice danger">{{ taskStore.error }}</div>
-      <div v-else-if="taskStore.loading" class="empty-state">正在加载今晚任务…</div>
-      <div v-else-if="taskStore.tasks.length === 0" class="empty-state">今晚还没有任务，先添加一件想完成的事。</div>
-      <ul v-else class="task-summary-list">
-        <li v-for="task in taskStore.tasks" :key="task.id"><span>○</span><strong>{{ task.title }}</strong></li>
-      </ul>
-      <div class="task-summary-actions">
-        <RouterLink to="/tasks?new=1" class="secondary-button">＋ 新建任务</RouterLink>
-        <RouterLink to="/tasks" class="text-link">查看全部 →</RouterLink>
-      </div>
+      <div v-if="!auth.authenticated" class="empty-state">登录后查看个人与共享任务。<button class="secondary-button" @click="auth.login('/')">使用 Steam 登录</button></div>
+      <template v-else>
+        <div v-if="taskStore.error" class="notice danger">{{ taskStore.error }}</div>
+        <div class="task-scope-summary"><strong>我的未完成 {{ mineTasks.length }}</strong><ul><li v-for="task in mineTasks" :key="task.id">{{ task.title }}</li></ul></div>
+        <div class="task-scope-summary"><strong>共享未完成 {{ sharedTasks.length }}</strong><ul><li v-for="task in sharedTasks" :key="task.id">{{ task.title }}</li></ul></div>
+        <div v-if="taskStore.loading" class="empty-state">正在加载今晚任务…</div>
+        <div v-else-if="taskStore.tasks.length === 0" class="empty-state">今晚还没有任务，先添加一件想完成的事。</div>
+        <ul v-else class="task-summary-list">
+          <li v-for="task in taskStore.tasks" :key="task.id"><span>○</span><strong>{{ task.title }}</strong></li>
+        </ul>
+        <div class="task-summary-actions">
+          <RouterLink to="/tasks?new=1" class="secondary-button">＋ 新建任务</RouterLink>
+          <RouterLink to="/tasks" class="text-link">查看全部 →</RouterLink>
+        </div>
+      </template>
     </section>
 
     <PlayerList :players="players" />
