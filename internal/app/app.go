@@ -11,10 +11,19 @@ import (
 	"github.com/dlcwshi/palworld-companion/internal/httpapi"
 	"github.com/dlcwshi/palworld-companion/internal/palworld"
 	"github.com/dlcwshi/palworld-companion/internal/serverstatus"
+	"github.com/dlcwshi/palworld-companion/internal/storage"
+	"github.com/dlcwshi/palworld-companion/internal/tasks"
 	"github.com/dlcwshi/palworld-companion/web"
 )
 
-func New(cfg config.Config, build httpapi.BuildInfo, logger *slog.Logger) (http.Handler, error) {
+type Application struct {
+	http.Handler
+	database *storage.DB
+}
+
+func (a *Application) Close() error { return a.database.Close() }
+
+func New(cfg config.Config, build httpapi.BuildInfo, logger *slog.Logger) (*Application, error) {
 	var client palworld.Client
 	if cfg.App.MockMode {
 		client = palworld.MockClient{}
@@ -27,11 +36,17 @@ func New(cfg config.Config, build httpapi.BuildInfo, logger *slog.Logger) (http.
 		client = httpClient
 	}
 	status := serverstatus.New(client, cfg.Cache.InfoTTL, cfg.Cache.MetricsTTL, cfg.Cache.PlayersTTL)
+	database, err := storage.Open(cfg.Database.Path)
+	if err != nil {
+		return nil, fmt.Errorf("initialize database: %w", err)
+	}
+	taskService := tasks.NewService(tasks.NewRepository(database.SQL()))
 	dist, err := fs.Sub(web.Assets, "dist")
 	if err != nil {
+		_ = database.Close()
 		return nil, fmt.Errorf("open embedded frontend: %w", err)
 	}
-	return httpapi.New(status, build, logger, dist), nil
+	return &Application{Handler: httpapi.New(status, taskService, build, logger, dist), database: database}, nil
 }
 
 func LogLevel(raw string) slog.Level {

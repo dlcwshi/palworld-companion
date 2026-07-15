@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	version   = "0.1.0"
+	version   = "0.2.0-dev"
 	commit    = ""
 	buildTime = ""
 )
@@ -36,6 +36,11 @@ func main() {
 		logger.Error("application setup failed", "error", err)
 		os.Exit(1)
 	}
+	defer func() {
+		if err := handler.Close(); err != nil {
+			logger.Error("database close failed", "error", err)
+		}
+	}()
 	server := &http.Server{Addr: cfg.Server.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		logger.Info("Palworld Companion listening", "address", cfg.Server.Listen, "version", version)
