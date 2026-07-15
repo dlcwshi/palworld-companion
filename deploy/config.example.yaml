@@ -1,0 +1,19 @@
+server:
+  listen: "127.0.0.1:8091"
+
+palworld:
+  base_url: "http://127.0.0.1:8212"
+  username: ""
+  password: ""
+  timeout: "3s"
+
+cache:
+  info_ttl: "30s"
+  metrics_ttl: "5s"
+  players_ttl: "3s"
+
+app:
+  mock_mode: true
+
+logging:
+  level: "info"

@@ -1,0 +1,27 @@
+[Unit]
+Description=Palworld Companion
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=palworld-companion
+Group=palworld-companion
+ExecStart=/usr/local/bin/palworld-companion --config /etc/palworld-companion/config.yaml
+WorkingDirectory=/var/lib/palworld-companion
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/palworld-companion
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+{
+  "name": "palworld-companion-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run type-check && vite build",
+    "type-check": "vue-tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "pinia": "^3.0.4",
+    "vue": "^3.5.22",
+    "vue-router": "^4.6.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "@vue/eslint-config-typescript": "^14.6.0",
+    "eslint": "^9.39.1",
+    "eslint-plugin-vue": "^10.6.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2",
+    "vite-plugin-pwa": "^1.1.0",
+    "vue-tsc": "^3.1.5"
+  }
+}
