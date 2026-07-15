@@ -17,7 +17,7 @@ button { font: inherit; }
 a { color: inherit; text-decoration: none; }
 .app-shell { min-height: 100vh; padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
 .page-shell { max-width: 720px; margin: 0 auto; }
-.home-page, .simple-page { padding: 26px 18px 30px; }
+.home-page, .simple-page, .tasks-page { padding: 26px 18px 30px; }
 .eyebrow { margin: 0 0 8px; color: var(--forest); font-size: 11px; font-weight: 800; letter-spacing: .18em; }
 .hero-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
 .hero-header h1, .simple-page > h1, .not-found h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 12vw, 58px); line-height: .98; letter-spacing: -.055em; }
@@ -83,8 +83,54 @@ a { color: inherit; text-decoration: none; }
 .not-found { display: grid; min-height: 70vh; place-content: center; padding: 28px; text-align: center; }
 .not-found p:not(.eyebrow) { color: var(--muted); }
 .primary-link { display: inline-block; justify-self: center; margin-top: 16px; padding: 12px 18px; border-radius: 999px; background: var(--ink); color: white; font-weight: 700; }
+.task-summary { padding: 18px; border: 1px solid var(--line); border-radius: 24px; background: rgba(248,250,244,.82); }
+.task-summary .section-heading { margin-bottom: 12px; }
+.task-summary .eyebrow { margin-bottom: 4px; }
+.task-summary-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.task-summary-list li { display: grid; grid-template-columns: 22px minmax(0,1fr); align-items: center; padding: 11px 12px; border-radius: 14px; background: #edf3e8; }
+.task-summary-list span { color: var(--forest); }
+.task-summary-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.task-summary-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.secondary-button, .primary-button { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; padding: 0 16px; border: 0; border-radius: 14px; font-weight: 750; cursor: pointer; }
+.secondary-button { background: var(--mint); color: var(--ink); }
+.primary-button { width: 100%; background: var(--ink); color: white; }
+.primary-button:disabled, .secondary-button:disabled { opacity: .55; }
+.text-link, .text-button { border: 0; background: transparent; color: var(--forest); font-size: 13px; font-weight: 750; cursor: pointer; }
+.tasks-page { min-height: 100vh; }
+.task-page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.task-page-header h1 { margin: 0; font-size: clamp(34px, 11vw, 52px); letter-spacing: -.05em; }
+.task-page-header p:not(.eyebrow) { max-width: 420px; margin: 9px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.round-add-button { flex: 0 0 auto; width: 48px; height: 48px; border: 0; border-radius: 16px; background: var(--ink); color: var(--mint); font-size: 28px; cursor: pointer; }
+.task-form { display: grid; gap: 14px; margin-bottom: 18px; padding: 18px; border-radius: 24px; background: #f8faf4; box-shadow: 0 14px 36px rgba(18,33,28,.1); }
+.task-form h2 { margin: 0; font-size: 20px; }
+.task-form label { display: grid; gap: 7px; color: #52605a; font-size: 12px; font-weight: 700; }
+.task-form input, .task-form textarea { width: 100%; min-height: 46px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 13px; outline: none; background: white; color: var(--ink); font: inherit; resize: vertical; }
+.task-form input:focus, .task-form textarea:focus { border-color: var(--forest); box-shadow: 0 0 0 3px rgba(29,105,87,.12); }
+.task-form small { color: var(--muted); font-weight: 400; }
+.form-error { margin: 0; color: #a13531; font-size: 12px; }
+.task-filter { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; margin-bottom: 14px; padding: 5px; border-radius: 16px; background: rgba(18,33,28,.07); }
+.task-filter button { min-height: 42px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 700; cursor: pointer; }
+.task-filter button.active { background: white; color: var(--ink); box-shadow: 0 3px 10px rgba(18,33,28,.08); }
+.task-empty { display: grid; justify-items: center; padding: 46px 20px; border: 1px dashed var(--line); border-radius: 24px; text-align: center; }
+.task-empty > span { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 18px; background: var(--mint); color: var(--forest); font-size: 25px; }
+.task-empty h2 { margin: 14px 0 6px; font-size: 20px; }
+.task-empty p { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+.task-list { display: grid; gap: 10px; }
+.task-row { display: grid; grid-template-columns: 42px minmax(0,1fr) auto; gap: 11px; align-items: start; padding: 15px; border: 1px solid var(--line); border-radius: 20px; background: rgba(248,250,244,.88); }
+.task-row.completed { opacity: .68; }
+.task-row.completed .task-content strong { text-decoration: line-through; }
+.task-check { width: 42px; height: 42px; border: 2px solid #aab6ae; border-radius: 14px; background: transparent; color: var(--forest); font-size: 20px; font-weight: 800; cursor: pointer; }
+.task-row.completed .task-check { border-color: var(--forest); background: var(--mint); }
+.task-content { min-width: 0; }
+.task-content strong { display: block; overflow-wrap: anywhere; font-size: 14px; }
+.task-content p { margin: 5px 0; color: var(--muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+.task-content small { color: #89938e; font-size: 10px; }
+.task-actions { display: flex; flex-direction: column; gap: 7px; }
+.task-actions button, .inline-retry { min-height: 32px; border: 0; border-radius: 9px; background: #e5ebe1; color: var(--forest); font-size: 11px; font-weight: 750; cursor: pointer; }
+.task-actions .danger-text { color: #9a4742; background: #f8e8e5; }
+.inline-retry { margin-left: 8px; padding: 0 10px; }
 @media (min-width: 640px) {
-  .home-page, .simple-page { padding: 42px 28px; }
+  .home-page, .simple-page, .tasks-page { padding: 42px 28px; }
   .metrics-grid { grid-template-columns: repeat(4, 1fr); }
   .metric-card { min-height: 120px; }
   .status-card { padding: 28px; }

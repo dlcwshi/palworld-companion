@@ -3,8 +3,10 @@ import { computed, onBeforeUnmount, onMounted } from 'vue'
 import MetricCard from '@/components/MetricCard.vue'
 import PlayerList from '@/components/PlayerList.vue'
 import { useServerStore } from '@/stores/server'
+import { useTaskStore } from '@/stores/tasks'
 
 const store = useServerStore()
+const taskStore = useTaskStore()
 let timer: number | undefined
 const server = computed(() => store.summary?.server)
 const players = computed(() => store.players?.players ?? [])
@@ -30,6 +32,7 @@ const onOnline = () => void store.refresh()
 
 onMounted(() => {
   void store.refresh()
+	void taskStore.load('pending', 5)
   timer = window.setInterval(() => { if (document.visibilityState === 'visible') void store.refresh() }, 5000)
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('online', onOnline)
@@ -44,7 +47,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="home-page">
     <header class="hero-header">
-      <div><p class="eyebrow">SELF-HOSTED · V0.1</p><h1>Palworld<br /><em>Companion</em></h1></div>
+      <div><p class="eyebrow">SELF-HOSTED · V0.2 DEV</p><h1>Palworld<br /><em>Companion</em></h1></div>
       <button class="refresh-button" type="button" :disabled="store.refreshing" aria-label="刷新" @click="store.refresh"><span :class="{ spinning: store.refreshing }">↻</span></button>
     </header>
 
@@ -70,6 +73,23 @@ onBeforeUnmount(() => {
       <MetricCard label="运行时间" :value="uptime" />
       <MetricCard label="世界天数" :value="number(server?.worldDays)" />
       <MetricCard label="基地数量" :value="number(server?.baseCount)" />
+    </section>
+
+    <section class="task-summary section-block">
+      <div class="section-heading">
+        <div><p class="eyebrow">TONIGHT</p><h2>今晚任务</h2></div>
+        <span class="count-pill">{{ taskStore.total }}</span>
+      </div>
+      <div v-if="taskStore.error" class="notice danger">{{ taskStore.error }}</div>
+      <div v-else-if="taskStore.loading" class="empty-state">正在加载今晚任务…</div>
+      <div v-else-if="taskStore.tasks.length === 0" class="empty-state">今晚还没有任务，先添加一件想完成的事。</div>
+      <ul v-else class="task-summary-list">
+        <li v-for="task in taskStore.tasks" :key="task.id"><span>○</span><strong>{{ task.title }}</strong></li>
+      </ul>
+      <div class="task-summary-actions">
+        <RouterLink to="/tasks?new=1" class="secondary-button">＋ 新建任务</RouterLink>
+        <RouterLink to="/tasks" class="text-link">查看全部 →</RouterLink>
+      </div>
     </section>
 
     <PlayerList :players="players" />
