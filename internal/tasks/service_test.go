@@ -128,3 +128,61 @@ func TestTaskSortingAndFilters(t *testing.T) {
 		t.Fatalf("pending=%+v err=%v", pending, err)
 	}
 }
+
+func TestMultiPlayerTaskPermissions(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "permissions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, u := range []struct {
+		id                int
+		steam, name, role string
+	}{{1, "1", "Player A", "player"}, {2, "2", "Player B", "player"}, {3, "3", "Admin", "admin"}} {
+		_, err := db.SQL().Exec(`INSERT INTO users(id,steam_id,palworld_user_id,character_name,role,status,created_at,updated_at,last_login_at) VALUES(?,?,?,?,?,'active',?,?,?)`, u.id, u.steam, "steam_"+u.steam, u.name, u.role, now, now, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := NewService(NewRepository(db.SQL()))
+	ctx := context.Background()
+	a := Actor{ID: 1, Role: "player"}
+	b := Actor{ID: 2, Role: "player"}
+	admin := Actor{ID: 3, Role: "admin"}
+	personal, err := service.CreateFor(ctx, a, CreateInput{Title: "A private", Visibility: VisibilityPersonal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GetFor(ctx, b, personal.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("B read A personal: %v", err)
+	}
+	changed := "stolen"
+	if _, err := service.UpdateFor(ctx, b, personal.ID, UpdateInput{Title: &changed}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("B edited A personal: %v", err)
+	}
+	if err := service.DeleteFor(ctx, b, personal.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("B deleted A personal: %v", err)
+	}
+	shared, err := service.CreateFor(ctx, a, CreateInput{Title: "A shared", Visibility: VisibilityShared})
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible, err := service.GetFor(ctx, b, shared.ID)
+	if err != nil || visible.CanManage {
+		t.Fatalf("B shared=%+v err=%v", visible, err)
+	}
+	if _, err := service.UpdateFor(ctx, b, shared.ID, UpdateInput{Title: &changed}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("B edited A shared: %v", err)
+	}
+	if _, err := service.UpdateFor(ctx, a, shared.ID, UpdateInput{Title: &changed}); err != nil {
+		t.Fatalf("A edit shared: %v", err)
+	}
+	if err := service.DeleteFor(ctx, admin, personal.ID); err != nil {
+		t.Fatalf("admin delete: %v", err)
+	}
+	list, err := service.ListFor(ctx, b, ListOptions{Status: "all", Scope: "visible", Limit: 100})
+	if err != nil || len(list.Tasks) != 1 || list.Tasks[0].ID != shared.ID {
+		t.Fatalf("B list=%+v err=%v", list, err)
+	}
+}

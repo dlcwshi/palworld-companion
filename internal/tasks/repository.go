@@ -11,6 +11,8 @@ type Repository struct{ db *sql.DB }
 
 func NewRepository(db *sql.DB) *Repository { return &Repository{db: db} }
 
+const taskColumns = `id,title,notes,status,sort_order,source_type,source_id,created_at,updated_at,completed_at,owner_id,created_by,visibility`
+
 func (r *Repository) Create(ctx context.Context, task *Task) error {
 	result, err := r.db.ExecContext(ctx, `INSERT INTO tasks(title, notes, status, sort_order, source_type, source_id, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, task.Title, task.Notes, task.Status, task.SortOrder, task.SourceType, task.SourceID, formatTime(task.CreatedAt), formatTime(task.UpdatedAt), nullableTime(task.CompletedAt))
 	if err != nil {
@@ -22,8 +24,16 @@ func (r *Repository) Create(ctx context.Context, task *Task) error {
 	}
 	return nil
 }
+func (r *Repository) CreateOwned(ctx context.Context, task *Task) error {
+	result, err := r.db.ExecContext(ctx, `INSERT INTO tasks(title,notes,status,sort_order,source_type,source_id,created_at,updated_at,completed_at,owner_id,created_by,visibility) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, task.Title, task.Notes, task.Status, task.SortOrder, task.SourceType, task.SourceID, formatTime(task.CreatedAt), formatTime(task.UpdatedAt), nullableTime(task.CompletedAt), task.OwnerID, task.CreatedBy, task.Visibility)
+	if err != nil {
+		return fmt.Errorf("create task: %w", err)
+	}
+	task.ID, err = result.LastInsertId()
+	return err
+}
 func (r *Repository) Get(ctx context.Context, id int64) (Task, error) {
-	task, err := scanTask(r.db.QueryRowContext(ctx, `SELECT id, title, notes, status, sort_order, source_type, source_id, created_at, updated_at, completed_at FROM tasks WHERE id = ?`, id))
+	task, err := scanTask(r.db.QueryRowContext(ctx, `SELECT `+taskColumns+` FROM tasks WHERE id = ?`, id))
 	if err == sql.ErrNoRows {
 		return Task{}, ErrNotFound
 	}
@@ -33,7 +43,7 @@ func (r *Repository) Get(ctx context.Context, id int64) (Task, error) {
 	return task, nil
 }
 func (r *Repository) List(ctx context.Context, options ListOptions) ([]Task, error) {
-	query := `SELECT id, title, notes, status, sort_order, source_type, source_id, created_at, updated_at, completed_at FROM tasks`
+	query := `SELECT ` + taskColumns + ` FROM tasks`
 	args := make([]any, 0, 2)
 	if options.Status != "all" {
 		query += ` WHERE status = ?`
@@ -58,6 +68,97 @@ func (r *Repository) List(ctx context.Context, options ListOptions) ([]Task, err
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
 	return result, nil
+}
+func scopeWhere(actor Actor, options ListOptions) (string, []any, error) {
+	if options.Scope == "" {
+		options.Scope = "visible"
+	}
+	args := []any{}
+	var visibility string
+	switch options.Scope {
+	case "mine":
+		visibility = `owner_id = ?`
+		args = append(args, actor.ID)
+	case "shared":
+		visibility = `visibility = 'shared'`
+	case "visible":
+		visibility = `(visibility = 'shared' OR owner_id = ?)`
+		args = append(args, actor.ID)
+	case "admin":
+		if actor.Role != "admin" {
+			return "", nil, ErrNotFound
+		}
+		visibility = `1=1`
+	default:
+		return "", nil, ErrInvalidInput
+	}
+	where := visibility
+	if options.Status != "all" {
+		where += ` AND status = ?`
+		args = append(args, options.Status)
+	}
+	return where, args, nil
+}
+func (r *Repository) GetVisible(ctx context.Context, actor Actor, id int64) (Task, error) {
+	query := `SELECT ` + taskColumns + ` FROM tasks WHERE id=? AND (visibility='shared' OR owner_id=? OR ?='admin')`
+	task, err := scanTask(r.db.QueryRowContext(ctx, query, id, actor.ID, actor.Role))
+	if err == sql.ErrNoRows {
+		return Task{}, ErrNotFound
+	}
+	if err != nil {
+		return Task{}, err
+	}
+	r.enrich(ctx, &task, actor)
+	return task, nil
+}
+func (r *Repository) ListVisible(ctx context.Context, actor Actor, options ListOptions) ([]Task, int, error) {
+	where, args, err := scopeWhere(actor, options)
+	if err != nil {
+		return nil, 0, err
+	}
+	var total int
+	if err := r.db.QueryRowContext(ctx, `SELECT count(*) FROM tasks WHERE `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	query := `SELECT ` + taskColumns + ` FROM tasks WHERE ` + where + ` ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END,sort_order ASC,created_at DESC LIMIT ?`
+	args = append(args, options.Limit)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := []Task{}
+	for rows.Next() {
+		task, e := scanTask(rows)
+		if e != nil {
+			_ = rows.Close()
+			return nil, 0, e
+		}
+		out = append(out, task)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	for i := range out {
+		r.enrich(ctx, &out[i], actor)
+	}
+	return out, total, nil
+}
+func (r *Repository) enrich(ctx context.Context, task *Task, actor Actor) {
+	task.CanManage = actor.Role == "admin" || (task.Visibility == VisibilityPersonal && task.OwnerID != nil && *task.OwnerID == actor.ID) || (task.Visibility == VisibilityShared && task.CreatedBy != nil && *task.CreatedBy == actor.ID)
+	if task.OwnerID == nil {
+		return
+	}
+	var name, status string
+	if err := r.db.QueryRowContext(ctx, `SELECT character_name,status FROM users WHERE id=?`, *task.OwnerID).Scan(&name, &status); err == nil {
+		if status == "deleted" {
+			name = "已删除玩家"
+		}
+		task.Owner = &OwnerSummary{ID: *task.OwnerID, CharacterName: name, Status: status}
+	}
 }
 func (r *Repository) Count(ctx context.Context, status string) (int, error) {
 	query := `SELECT count(*) FROM tasks`
@@ -107,7 +208,7 @@ func scanTask(row scanner) (Task, error) {
 	var task Task
 	var created, updated string
 	var completed sql.NullString
-	if err := row.Scan(&task.ID, &task.Title, &task.Notes, &task.Status, &task.SortOrder, &task.SourceType, &task.SourceID, &created, &updated, &completed); err != nil {
+	if err := row.Scan(&task.ID, &task.Title, &task.Notes, &task.Status, &task.SortOrder, &task.SourceType, &task.SourceID, &created, &updated, &completed, &task.OwnerID, &task.CreatedBy, &task.Visibility); err != nil {
 		return Task{}, err
 	}
 	var err error

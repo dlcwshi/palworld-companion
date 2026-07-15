@@ -1,12 +1,14 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/dlcwshi/palworld-companion/internal/auth"
 	"github.com/dlcwshi/palworld-companion/internal/config"
 	"github.com/dlcwshi/palworld-companion/internal/httpapi"
 	"github.com/dlcwshi/palworld-companion/internal/palworld"
@@ -41,12 +43,14 @@ func New(cfg config.Config, build httpapi.BuildInfo, logger *slog.Logger) (*Appl
 		return nil, fmt.Errorf("initialize database: %w", err)
 	}
 	taskService := tasks.NewService(tasks.NewRepository(database.SQL()))
+	authService := auth.NewService(auth.NewRepository(database.SQL()), client, auth.SteamVerifier{}, cfg.Auth.Enabled, cfg.Auth.PublicBaseURL, cfg.Auth.SessionTTL, cfg.Auth.AdminSteamIDs)
+	authService.Cleanup(context.Background())
 	dist, err := fs.Sub(web.Assets, "dist")
 	if err != nil {
 		_ = database.Close()
 		return nil, fmt.Errorf("open embedded frontend: %w", err)
 	}
-	return &Application{Handler: httpapi.New(status, taskService, build, logger, dist), database: database}, nil
+	return &Application{Handler: httpapi.New(status, taskService, authService, build, logger, dist), database: database}, nil
 }
 
 func LogLevel(raw string) slog.Level {

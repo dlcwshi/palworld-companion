@@ -11,7 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const CurrentSchemaVersion = 1
+const CurrentSchemaVersion = 3
 
 type DB struct{ sql *sql.DB }
 type migration struct {
@@ -33,6 +33,51 @@ CREATE TABLE tasks (
     completed_at TEXT
 );
 CREATE INDEX idx_tasks_list ON tasks(status, sort_order, created_at DESC);
+`}, {version: 2, sql: `
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    steam_id TEXT NOT NULL UNIQUE,
+    palworld_user_id TEXT NOT NULL UNIQUE,
+    palworld_player_id TEXT NOT NULL DEFAULT '',
+    character_name TEXT NOT NULL,
+    account_name TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT 'player' CHECK (role IN ('admin', 'player')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'deleted')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_login_at TEXT NOT NULL,
+    last_seen_at TEXT,
+    deleted_at TEXT
+);
+CREATE TABLE sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    revoked_at TEXT
+);
+CREATE TABLE auth_flows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    state_hash TEXT NOT NULL UNIQUE,
+    return_path TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT
+);
+CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX idx_sessions_token_hash ON sessions(token_hash);
+CREATE INDEX idx_users_steam_id ON users(steam_id);
+CREATE INDEX idx_users_palworld_user_id ON users(palworld_user_id);
+`}, {version: 3, sql: `
+ALTER TABLE tasks ADD COLUMN owner_id INTEGER REFERENCES users(id);
+ALTER TABLE tasks ADD COLUMN created_by INTEGER REFERENCES users(id);
+ALTER TABLE tasks ADD COLUMN visibility TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('personal', 'shared'));
+CREATE INDEX idx_tasks_owner_id ON tasks(owner_id);
+CREATE INDEX idx_tasks_created_by ON tasks(created_by);
+CREATE INDEX idx_tasks_visibility ON tasks(visibility);
+CREATE INDEX idx_tasks_status ON tasks(status);
 `}}
 
 func Open(path string) (*DB, error) {
@@ -78,6 +123,13 @@ func (d *DB) initialize(ctx context.Context) error {
 	}
 	if _, err := d.sql.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
 		return fmt.Errorf("initialize migrations: %w", err)
+	}
+	var highest sql.NullInt64
+	if err := d.sql.QueryRowContext(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&highest); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if highest.Valid && highest.Int64 > CurrentSchemaVersion {
+		return fmt.Errorf("database schema version %d is newer than supported version %d", highest.Int64, CurrentSchemaVersion)
 	}
 	for _, item := range migrations {
 		var exists int

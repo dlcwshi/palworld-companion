@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,8 +13,10 @@ import (
 	"time"
 
 	"github.com/dlcwshi/palworld-companion/internal/app"
+	"github.com/dlcwshi/palworld-companion/internal/auth"
 	"github.com/dlcwshi/palworld-companion/internal/config"
 	"github.com/dlcwshi/palworld-companion/internal/httpapi"
+	"github.com/dlcwshi/palworld-companion/internal/storage"
 )
 
 var (
@@ -22,6 +26,13 @@ var (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "users" {
+		if err := runUsers(os.Args[2:]); err != nil {
+			slog.Error("users command failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	configPath := flag.String("config", "deploy/config.example.yaml", "path to YAML configuration")
 	flag.Parse()
 	cfg, err := config.Load(*configPath)
@@ -56,5 +67,46 @@ func main() {
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
+	}
+}
+
+func runUsers(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: users list|set-role")
+	}
+	command := args[0]
+	set := flag.NewFlagSet("users "+command, flag.ContinueOnError)
+	configPath := set.String("config", "deploy/config.example.yaml", "path to YAML configuration")
+	steamID := set.String("steam-id", "", "SteamID64")
+	role := set.String("role", "", "admin or player")
+	if err := set.Parse(args[1:]); err != nil {
+		return err
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	db, err := storage.Open(cfg.Database.Path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	repo := auth.NewRepository(db.SQL())
+	switch command {
+	case "list":
+		users, err := repo.ListUsers(context.Background())
+		if err != nil {
+			return err
+		}
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(users)
+	case "set-role":
+		if *steamID == "" {
+			return fmt.Errorf("--steam-id is required")
+		}
+		return repo.SetRoleBySteamID(context.Background(), *steamID, *role, time.Now().UTC())
+	default:
+		return fmt.Errorf("unknown users command %q", command)
 	}
 }

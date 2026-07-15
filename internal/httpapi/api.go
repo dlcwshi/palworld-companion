@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dlcwshi/palworld-companion/internal/auth"
 	"github.com/dlcwshi/palworld-companion/internal/serverstatus"
 	"github.com/dlcwshi/palworld-companion/internal/tasks"
 )
@@ -25,14 +26,15 @@ type BuildInfo struct {
 type API struct {
 	status *serverstatus.Service
 	tasks  *tasks.Service
+	auth   *auth.Service
 	build  BuildInfo
 	log    *slog.Logger
 	assets fs.FS
 	static http.Handler
 }
 
-func New(status *serverstatus.Service, taskService *tasks.Service, build BuildInfo, logger *slog.Logger, assets fs.FS) http.Handler {
-	api := &API{status: status, tasks: taskService, build: build, log: logger, assets: assets}
+func New(status *serverstatus.Service, taskService *tasks.Service, authService *auth.Service, build BuildInfo, logger *slog.Logger, assets fs.FS) http.Handler {
+	api := &API{status: status, tasks: taskService, auth: authService, build: build, log: logger, assets: assets}
 	if assets != nil {
 		api.static = http.FileServer(http.FS(assets))
 	}
@@ -42,6 +44,16 @@ func New(status *serverstatus.Service, taskService *tasks.Service, build BuildIn
 	mux.HandleFunc("GET /api/v1/system/capabilities", api.capabilities)
 	mux.HandleFunc("GET /api/v1/server/summary", api.summary)
 	mux.HandleFunc("GET /api/v1/server/players", api.players)
+	mux.HandleFunc("GET /api/v1/auth/steam", api.steamLogin)
+	mux.HandleFunc("GET /api/v1/auth/steam/callback", api.steamCallback)
+	mux.HandleFunc("GET /api/v1/auth/me", api.me)
+	mux.HandleFunc("POST /api/v1/auth/logout", api.logout)
+	mux.HandleFunc("GET /api/v1/admin/users", api.adminUsers)
+	mux.HandleFunc("POST /api/v1/admin/users/{id}/disable", api.adminDisable)
+	mux.HandleFunc("POST /api/v1/admin/users/{id}/enable", api.adminEnable)
+	mux.HandleFunc("DELETE /api/v1/admin/users/{id}", api.adminDelete)
+	mux.HandleFunc("POST /api/v1/admin/users/{id}/restore", api.adminRestore)
+	mux.HandleFunc("POST /api/v1/admin/users/{id}/revoke-sessions", api.adminRevokeSessions)
 	mux.HandleFunc("GET /api/v1/tasks", api.listTasks)
 	mux.HandleFunc("POST /api/v1/tasks", api.createTask)
 	mux.HandleFunc("GET /api/v1/tasks/{id}", api.getTask)
@@ -56,7 +68,8 @@ func (a *API) health(w http.ResponseWriter, _ *http.Request) {
 }
 func (a *API) version(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, a.build) }
 func (a *API) capabilities(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"palworld": map[string]bool{"info": true, "metrics": true, "players": true}, "features": map[string]bool{"crafting": false, "breeding": false, "map": false, "tasks": true}})
+	enabled := a.auth != nil && a.auth.Enabled()
+	writeJSON(w, http.StatusOK, map[string]any{"palworld": map[string]bool{"info": true, "metrics": true, "players": true}, "features": map[string]bool{"crafting": false, "breeding": false, "map": false, "tasks": enabled, "steamAuth": enabled, "userAccounts": enabled, "taskOwnership": enabled, "adminUsers": enabled}})
 }
 func (a *API) summary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a.status.Summary(r.Context()))
@@ -66,8 +79,9 @@ func (a *API) players(w http.ResponseWriter, r *http.Request) {
 }
 
 type taskCreateRequest struct {
-	Title string `json:"title"`
-	Notes string `json:"notes"`
+	Title      string `json:"title"`
+	Notes      string `json:"notes"`
+	Visibility string `json:"visibility"`
 }
 type taskUpdateRequest struct {
 	Title     *string `json:"title"`
@@ -77,6 +91,10 @@ type taskUpdateRequest struct {
 }
 
 func (a *API) listTasks(w http.ResponseWriter, r *http.Request) {
+	user, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	limit := 0
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		value, err := strconv.Atoi(raw)
@@ -86,7 +104,7 @@ func (a *API) listTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = value
 	}
-	result, err := a.tasks.List(r.Context(), tasks.ListOptions{Status: r.URL.Query().Get("status"), Limit: limit})
+	result, err := a.tasks.ListFor(r.Context(), tasks.Actor{ID: user.ID, Role: user.Role}, tasks.ListOptions{Status: r.URL.Query().Get("status"), Limit: limit, Scope: r.URL.Query().Get("scope")})
 	if err != nil {
 		a.taskError(w, err)
 		return
@@ -94,11 +112,15 @@ func (a *API) listTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 func (a *API) createTask(w http.ResponseWriter, r *http.Request) {
+	user, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	var request taskCreateRequest
 	if err := decodeJSON(w, r, &request); err != nil {
 		return
 	}
-	task, err := a.tasks.Create(r.Context(), tasks.CreateInput{Title: request.Title, Notes: request.Notes})
+	task, err := a.tasks.CreateFor(r.Context(), tasks.Actor{ID: user.ID, Role: user.Role}, tasks.CreateInput{Title: request.Title, Notes: request.Notes, Visibility: request.Visibility})
 	if err != nil {
 		a.taskError(w, err)
 		return
@@ -106,11 +128,15 @@ func (a *API) createTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, task)
 }
 func (a *API) getTask(w http.ResponseWriter, r *http.Request) {
+	user, authenticated := a.requireUser(w, r)
+	if !authenticated {
+		return
+	}
 	id, ok := taskID(w, r)
 	if !ok {
 		return
 	}
-	task, err := a.tasks.Get(r.Context(), id)
+	task, err := a.tasks.GetFor(r.Context(), tasks.Actor{ID: user.ID, Role: user.Role}, id)
 	if err != nil {
 		a.taskError(w, err)
 		return
@@ -118,6 +144,10 @@ func (a *API) getTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, task)
 }
 func (a *API) updateTask(w http.ResponseWriter, r *http.Request) {
+	user, authenticated := a.requireUser(w, r)
+	if !authenticated {
+		return
+	}
 	id, ok := taskID(w, r)
 	if !ok {
 		return
@@ -126,7 +156,7 @@ func (a *API) updateTask(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(w, r, &request); err != nil {
 		return
 	}
-	task, err := a.tasks.Update(r.Context(), id, tasks.UpdateInput{Title: request.Title, Notes: request.Notes, Status: request.Status, SortOrder: request.SortOrder})
+	task, err := a.tasks.UpdateFor(r.Context(), tasks.Actor{ID: user.ID, Role: user.Role}, id, tasks.UpdateInput{Title: request.Title, Notes: request.Notes, Status: request.Status, SortOrder: request.SortOrder})
 	if err != nil {
 		a.taskError(w, err)
 		return
@@ -134,11 +164,15 @@ func (a *API) updateTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, task)
 }
 func (a *API) deleteTask(w http.ResponseWriter, r *http.Request) {
+	user, authenticated := a.requireUser(w, r)
+	if !authenticated {
+		return
+	}
 	id, ok := taskID(w, r)
 	if !ok {
 		return
 	}
-	if err := a.tasks.Delete(r.Context(), id); err != nil {
+	if err := a.tasks.DeleteFor(r.Context(), tasks.Actor{ID: user.ID, Role: user.Role}, id); err != nil {
 		a.taskError(w, err)
 		return
 	}

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -16,6 +17,15 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	App      AppConfig      `yaml:"app"`
 	Logging  LoggingConfig  `yaml:"logging"`
+	Auth     AuthConfig     `yaml:"auth"`
+}
+
+type AuthConfig struct {
+	Enabled        bool          `yaml:"enabled"`
+	PublicBaseURL  string        `yaml:"public_base_url"`
+	SessionTTL     time.Duration `yaml:"-"`
+	SessionTTLText string        `yaml:"session_ttl"`
+	AdminSteamIDs  []string      `yaml:"admin_steam_ids"`
 }
 
 type ServerConfig struct {
@@ -81,6 +91,22 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Cache.PlayersTTL, err = durationOrDefault(cfg.Cache.PlayersTTLText, 3*time.Second, "cache.players_ttl"); err != nil {
 		return Config{}, err
+	}
+	if cfg.Auth.SessionTTL, err = durationOrDefault(cfg.Auth.SessionTTLText, 30*24*time.Hour, "auth.session_ttl"); err != nil {
+		return Config{}, err
+	}
+	if cfg.Auth.Enabled {
+		if cfg.Auth.PublicBaseURL == "" {
+			return Config{}, errors.New("auth.public_base_url is required when auth is enabled")
+		}
+		u, parseErr := url.Parse(cfg.Auth.PublicBaseURL)
+		if parseErr != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return Config{}, errors.New("auth.public_base_url must be an absolute HTTPS URL")
+		}
+		cfg.Auth.PublicBaseURL = u.String()
+		if cfg.Auth.PublicBaseURL[len(cfg.Auth.PublicBaseURL)-1] != '/' {
+			cfg.Auth.PublicBaseURL += "/"
+		}
 	}
 	return cfg, nil
 }

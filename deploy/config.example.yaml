@@ -13,6 +13,12 @@ cache:
   players_ttl: "3s"
 
 database:
+auth:
+  enabled: true
+  public_base_url: "https://pal.gravioncloud.com"
+  session_ttl: "720h"
+  admin_steam_ids: []
+
   path: "./data/companion.db"
 
 app:
