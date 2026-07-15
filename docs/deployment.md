@@ -113,3 +113,15 @@ PWA Service Worker 的 navigation fallback 排除整个 `/api/`，不会缓存 s
 - 公网 HTTP 首页返回 301，HTTPS 首页、health、capabilities、manifest、图标和 Service Worker 均返回 200；未修改 Nginx、FRP、防火墙或 8212。
 - 本次只停止并启动 `palworld-companion.service`。部署前后 `palworld-server.service` 保持 PID `113468`、active 时间 `2026-07-15 09:35:34 UTC`，`palworld-pst.service` 保持 PID `107527`、active 时间 `2026-07-15 01:48:58 UTC`；未修改配置、数据库或存档，未执行 `clean-seeds`，未发生回滚。
 - 真人首次 Steam 登录尚未执行。项目所有者需在 Palworld 在线时通过公网登录，确认账号绑定后再使用 `users set-role` 将该真实 SteamID 提升为管理员。
+
+## 2026-07-15 v0.3.0-dev 本地认证部署记录
+
+- 部署源码提交为 `516a48b`，版本为 `0.3.0-dev`，构建时间为 `2026-07-15T11:43:02Z`。Linux AMD64 产物大小为 `16821646` 字节，SHA-256 为 `14d442114fdbbe83412e96a2bae627b9772282f2ac74d6b31df7ab7ef6a3243b`。
+- 上传产物保留在 `/tmp/palworld-companion-516a48b`；部署程序为 `/usr/local/bin/palworld-companion`。更新前备份位于 `/root/palworld-companion-backup-20260715-114451`，包含旧二进制、配置、unit 和停止服务后的 `companion.db`；当时 WAL/SHM 不存在，因此备份中没有这两个文件。
+- 现有 `/etc/palworld-companion/config.yaml` 未修改，部署前后 SHA-256 一致。旧 Steam 认证字段仍可解析但不参与认证；未修改 Nginx、FRP、防火墙、8212 或 Palworld 上游配置。
+- SQLite schema 从 3 自动迁移到 4，验收时 `users=0`、`sessions=0`、`tasks=0`，历史 `auth_flows=5` 保留，`system_settings.setup_completed=false`，`setupRequired=true`，journal mode 为 WAL，`PRAGMA foreign_key_check` 无违规。数据库权限为 `0640`，所有者为 `palworld-companion:palworld-companion`。
+- Companion 服务保持 enabled、active 和 running，PID 为 `119593`，监听 `0.0.0.0:8091`。health、system version、capabilities、setup status、未认证任务拒绝和 CLI setup status 均已验证；本地认证、初始管理员、玩家注册、用户审批、任务归属能力均启用，Steam 认证能力关闭。
+- 公网 HTTP 首页返回 301 并跳转 HTTPS；HTTPS 首页、`/setup`、health、system version、capabilities、setup status、manifest、图标、Service Worker 和玩家接口均返回 200。两个旧 Steam 路由返回 HTTP 410，未认证任务接口返回 HTTP 401。
+- 公网玩家对象仅包含 `name`、`level`、`ping`、`position`。部署后 Companion 日志未命中密码、Cookie、Authorization、Session token、OpenID 签名或 Steam 域名，也未发现 panic、fatal、迁移错误或外键错误；进程验收时无已建立的外部连接。
+- 本次仅停止并启动 `palworld-companion.service`。`palworld-server.service` 保持 PID `113468`、active 时间 `2026-07-15 09:35:34 UTC`；`palworld-pst.service` 保持 PID `107527`、active 时间 `2026-07-15 01:48:58 UTC`。未修改或重启 PalServer/PST，未触碰其配置、数据库或存档，未执行 `clean-seeds`，未使用 Docker，未发生回滚。
+- 自动化和浏览器测试覆盖了空库 Setup、本地登录、注册审批状态、密码与 Session、安全边界、移动端 390 像素页面和 PWA 前置链路。仍需项目所有者本人完成首任管理员初始化、使用真实在线玩家注册并在管理员页面审批，以及在实体手机上执行“安装到主屏幕”的最终点击；部署人员未创建或猜测任何真实账号、密码或身份映射。
