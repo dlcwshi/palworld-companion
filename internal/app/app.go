@@ -12,6 +12,7 @@ import (
 	"github.com/dlcwshi/palworld-companion/internal/config"
 	"github.com/dlcwshi/palworld-companion/internal/httpapi"
 	"github.com/dlcwshi/palworld-companion/internal/palworld"
+	"github.com/dlcwshi/palworld-companion/internal/roster"
 	"github.com/dlcwshi/palworld-companion/internal/serverstatus"
 	"github.com/dlcwshi/palworld-companion/internal/storage"
 	"github.com/dlcwshi/palworld-companion/internal/tasks"
@@ -28,7 +29,7 @@ func (a *Application) Close() error { return a.database.Close() }
 func New(cfg config.Config, build httpapi.BuildInfo, logger *slog.Logger) (*Application, error) {
 	var client palworld.Client
 	if cfg.App.MockMode {
-		client = palworld.MockClient{}
+		client = &palworld.MockClient{}
 		logger.Info("mock mode enabled; Palworld API will not be contacted")
 	} else {
 		httpClient, err := palworld.NewHTTPClient(cfg.Palworld.BaseURL, cfg.Palworld.Username, cfg.Palworld.Password, cfg.Palworld.Timeout)
@@ -37,13 +38,14 @@ func New(cfg config.Config, build httpapi.BuildInfo, logger *slog.Logger) (*Appl
 		}
 		client = httpClient
 	}
-	status := serverstatus.New(client, cfg.Cache.InfoTTL, cfg.Cache.MetricsTTL, cfg.Cache.PlayersTTL)
 	database, err := storage.Open(cfg.Database.Path)
 	if err != nil {
 		return nil, fmt.Errorf("initialize database: %w", err)
 	}
+	playerRoster := roster.NewService(roster.NewRepository(database.SQL()), client, cfg.Cache.PlayersTTL)
+	status := serverstatus.New(client, playerRoster, cfg.Cache.InfoTTL, cfg.Cache.MetricsTTL)
 	taskService := tasks.NewService(tasks.NewRepository(database.SQL()))
-	authService := auth.NewService(auth.NewRepository(database.SQL()), client, cfg.Auth.SessionTTL)
+	authService := auth.NewService(auth.NewRepository(database.SQL()), playerRoster, cfg.Auth.SessionTTL)
 	authService.Cleanup(context.Background())
 	dist, err := fs.Sub(web.Assets, "dist")
 	if err != nil {

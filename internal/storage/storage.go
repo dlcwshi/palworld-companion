@@ -11,7 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const CurrentSchemaVersion = 4
+const CurrentSchemaVersion = 5
 
 type DB struct{ sql *sql.DB }
 type migration struct {
@@ -119,6 +119,33 @@ CREATE TABLE system_settings (
 );
 INSERT INTO system_settings(key,value,updated_at)
 SELECT 'setup_completed',CASE WHEN EXISTS(SELECT 1 FROM users WHERE role='admin') THEN 'true' ELSE 'false' END,strftime('%Y-%m-%dT%H:%M:%fZ','now');
+`}, {version: 5, sql: `
+CREATE TABLE player_roster (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    palworld_user_id TEXT NOT NULL,
+    palworld_player_id TEXT,
+    character_name TEXT NOT NULL,
+    level INTEGER NOT NULL DEFAULT 0,
+    is_online INTEGER NOT NULL DEFAULT 1 CHECK (is_online IN (0, 1)),
+    first_seen_at TEXT NOT NULL,
+    last_online_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_player_roster_user_id ON player_roster(palworld_user_id);
+CREATE UNIQUE INDEX idx_player_roster_player_id ON player_roster(palworld_player_id)
+WHERE palworld_player_id IS NOT NULL AND palworld_player_id <> '';
+CREATE INDEX idx_player_roster_last_online_at ON player_roster(last_online_at);
+CREATE INDEX idx_player_roster_presence ON player_roster(is_online, last_online_at DESC);
+INSERT INTO player_roster(
+    palworld_user_id,palworld_player_id,character_name,level,is_online,
+    first_seen_at,last_online_at,updated_at
+)
+SELECT palworld_user_id,NULLIF(palworld_player_id,''),character_name,0,1,
+       created_at,COALESCE(NULLIF(last_seen_at,''),created_at),updated_at
+FROM users
+WHERE palworld_user_id IS NOT NULL
+  AND palworld_user_id <> ''
+  AND character_name <> '';
 `}}
 
 func Open(path string) (*DB, error) {

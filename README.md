@@ -8,11 +8,11 @@
 
 Palworld Companion 是自托管、手机端优先的 Palworld 玩家辅助 PWA。Go 后端通过严格的只读白名单连接 Palworld REST API，在 SQLite 中保存 Companion 自身账号和任务，并把 Vue 前端嵌入单个可执行文件。
 
-**当前仓库版本：0.3.1-dev。**不创建 v0.3.1 Tag 或正式 Release。
+**当前仓库版本：0.4.0-dev。**不创建 v0.4.0 Tag 或正式 Release。
 
 ## 当前功能
 
-- 服务器状态、核心指标与经过脱敏的在线玩家列表。
+- 服务器状态、核心指标与经过脱敏的持久化玩家名册。
 - 首次打开强制创建本地管理员账号。
 - 管理员使用用户名和密码登录；玩家可使用角色名或 SteamID64 和本地密码登录。
 - 玩家注册时必须在线进入本 Palworld 服务器；后端实时精确匹配唯一角色名，再从 `userId=steam_<SteamID64>` 解析并绑定身份，注册后等待管理员审批。
@@ -55,7 +55,7 @@ pending、disabled、rejected 和 deleted 账号均不能登录。重复 SteamID
 - 玩家只能看到自己的个人任务，不能通过 ID 访问其他玩家的个人任务。
 - 共享任务对全部已登录用户可见，仅创建者或管理员可修改。
 - 管理员可管理全部任务；无权限访问统一返回 404。
-- schema 4 不修改 `tasks.owner_id`、`created_by` 或 `visibility`，旧任务不会丢失。
+- schema 5 不修改 `tasks.owner_id`、`created_by` 或 `visibility`，旧任务不会丢失。
 
 ## 快速开始
 
@@ -72,7 +72,15 @@ go run ./cmd/companion --config deploy/config.example.yaml
 
 打开 <http://127.0.0.1:8091>。示例配置使用 Mock 模式和 `./data/companion.db`。
 
-配置中的 `auth.enabled`、`public_base_url`、`admin_steam_ids` 仅为旧版本兼容字段，0.3.1-dev 会读取但不会用于 Steam 认证。仍使用 `auth.session_ttl` 控制 Session 有效期。
+配置中的 `auth.enabled`、`public_base_url`、`admin_steam_ids` 仅为旧版本兼容字段，0.4.0-dev 会读取但不会用于 Steam 认证。仍使用 `auth.session_ttl` 控制 Session 有效期。
+
+## 持久化玩家名册
+
+0.4.0-dev 将完整校验后的新鲜 /players 成功快照写入 SQLite schema 5 的 player_roster。稳定身份键是内部 palworld_user_id，角色名只用于显示和本地登录查找；公共 API 不返回 SteamID64、Palworld userId/playerId、accountName、IP 或数据库 ID。
+
+只有新鲜、完整且有效的成功快照会改变在线状态并更新 player_roster_last_success_at。API 请求失败、格式异常、事务失败、TTL 命中或 SQLite 回退都不会把玩家标记离线，也不会延长最后在线时间。故障期间历史名册继续显示，但所有当前状态统一为“状态未知”；服务重启后历史名册仍可恢复。
+
+“最后在线”表示 Companion 最后一次通过成功快照发现角色在线的时间。本版本没有在线时长统计、历史图表或后台常驻轮询；名册由首页、summary、玩家接口以及角色名注册的强制新鲜请求触发。角色名注册仍要求角色提交时实时在线，不能使用持久化名册代替身份确认。
 
 ## API
 
@@ -124,9 +132,9 @@ palworld-companion users reset-password --config /etc/palworld-companion/config.
 
 ## 数据库升级与回滚
 
-schema 4 增加本地用户名、Argon2id 密码哈希、审批/拒绝审计字段和持久化 `system_settings.setup_completed`。schema 3 用户、Session、任务和用户 ID 原地保留；旧 Steam 用户没有密码时不能无密码登录，管理员可为其重置密码。程序拒绝打开比自身更新的 schema。
+schema 5 在 schema 4 本地认证基础上增加持久化玩家名册；schema 4 增加本地用户名、Argon2id 密码哈希、审批/拒绝审计字段和持久化 `system_settings.setup_completed`。schema 3 用户、Session、任务和用户 ID 原地保留；旧 Steam 用户没有密码时不能无密码登录，管理员可为其重置密码。程序拒绝打开比自身更新的 schema。
 
-升级前停止 Companion 并备份二进制、配置、`companion.db` 及 WAL/SHM。迁移失败会回滚事务并拒绝启动。回滚程序时必须同时恢复升级前数据库文件，不能让旧二进制打开 schema 4。
+升级前停止 Companion 并备份二进制、配置、`companion.db` 及 WAL/SHM。迁移失败会回滚事务并拒绝启动。回滚程序时必须同时恢复升级前数据库文件，不能让旧二进制打开 schema 5。
 
 完整步骤见 [docs/deployment.md](docs/deployment.md)。
 

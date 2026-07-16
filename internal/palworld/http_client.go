@@ -34,7 +34,13 @@ func (c *HTTPClient) GetMetrics(ctx context.Context) (Metrics, error) {
 }
 func (c *HTTPClient) GetPlayers(ctx context.Context) (Players, error) {
 	var v Players
-	return v, c.get(ctx, "/v1/api/players", &v)
+	if err := c.get(ctx, "/v1/api/players", &v); err != nil {
+		return v, err
+	}
+	if err := ValidatePlayers(v); err != nil {
+		return Players{}, err
+	}
+	return v, nil
 }
 
 func (c *HTTPClient) get(ctx context.Context, endpoint string, dst any) error {
@@ -55,8 +61,12 @@ func (c *HTTPClient) get(ctx context.Context, endpoint string, dst any) error {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("Palworld %s returned HTTP %d", endpoint, resp.StatusCode)
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(dst); err != nil {
+	decoder := json.NewDecoder(io.LimitReader(resp.Body, 2<<20))
+	if err := decoder.Decode(dst); err != nil {
 		return fmt.Errorf("decode Palworld %s response: %w", endpoint, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return fmt.Errorf("decode Palworld %s response: trailing JSON content", endpoint)
 	}
 	return nil
 }

@@ -19,13 +19,17 @@ import (
 
 type Service struct {
 	repo      *Repository
-	players   palworld.Client
+	players   freshPlayerSource
 	ttl       time.Duration
 	dummyHash string
 	now       func() time.Time
 }
 
-func NewService(repo *Repository, players palworld.Client, ttl time.Duration) *Service {
+type freshPlayerSource interface {
+	FreshPlayers(context.Context) (palworld.Players, error)
+}
+
+func NewService(repo *Repository, players freshPlayerSource, ttl time.Duration) *Service {
 	dummy, _ := HashPassword("constant-time-dummy-password")
 	return &Service{repo: repo, players: players, ttl: ttl, dummyHash: dummy, now: time.Now}
 }
@@ -156,8 +160,14 @@ func (s *Service) Register(ctx context.Context, input RegistrationInput) (User, 
 	} else if !isSteamID(steamID) {
 		return User{}, fmt.Errorf("%w: SteamID64 must contain decimal digits and fit uint64", ErrInvalidInput)
 	}
-	players, err := palworld.GetPlayersFreshForIdentityBinding(ctx, s.players)
+	if s.players == nil {
+		return User{}, ErrUpstream
+	}
+	players, err := s.players.FreshPlayers(ctx)
 	if err != nil {
+		if errors.Is(err, palworld.ErrPlayerIdentityUnavailable) {
+			return User{}, ErrPlayerIdentity
+		}
 		return User{}, ErrUpstream
 	}
 	var matches []*palworld.Player

@@ -45,7 +45,7 @@ func authFixture(t *testing.T, client palworld.Client) (*storage.DB, *Service) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return db, NewService(NewRepository(db.SQL()), client, time.Hour)
+	return db, NewService(NewRepository(db.SQL()), palworld.FreshClient{Client: client}, time.Hour)
 }
 func setupAdmin(t *testing.T, service *Service) (User, string) {
 	t.Helper()

@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/dlcwshi/palworld-companion/internal/palworld"
+	"github.com/dlcwshi/palworld-companion/internal/roster"
+	"github.com/dlcwshi/palworld-companion/internal/storage"
 )
 
 type fakeClient struct {
@@ -22,11 +25,22 @@ func (f *fakeClient) GetInfo(context.Context) (palworld.Info, error)       { ret
 func (f *fakeClient) GetMetrics(context.Context) (palworld.Metrics, error) { return f.metrics, f.err }
 func (f *fakeClient) GetPlayers(context.Context) (palworld.Players, error) { return f.players, f.err }
 
+func newStatusService(t *testing.T, client palworld.Client) *Service {
+	t.Helper()
+	db, err := storage.Open(filepath.Join(t.TempDir(), "status.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	playerRoster := roster.NewService(roster.NewRepository(db.SQL()), client, time.Minute)
+	return New(client, playerRoster, time.Minute, time.Minute)
+}
+
 func TestSummaryNormalizesFields(t *testing.T) {
 	version := "v1"
 	client := &fakeClient{info: palworld.Info{ServerName: "Test", Version: &version}, metrics: palworld.Metrics{ServerFPS: 58.4, CurrentPlayers: 4, MaxPlayers: 50, Uptime: 60, Days: 3, BaseCampCount: 2}}
-	result := New(client, time.Minute, time.Minute, time.Minute).Summary(context.Background())
-	if !result.Available || result.Server == nil || result.Server.Name != "Test" || *result.Server.FPS != 58.4 || result.Error != nil {
+	result := newStatusService(t, client).Summary(context.Background())
+	if !result.Available || result.Server == nil || result.Server.Name != "Test" || *result.Server.FPS != 58.4 || !result.Server.OnlinePlayersKnown || result.Server.OnlinePlayers == nil || *result.Server.OnlinePlayers != 0 || result.Error != nil {
 		t.Fatalf("unexpected summary: %+v", result)
 	}
 }
@@ -34,8 +48,8 @@ func TestSummaryNormalizesFields(t *testing.T) {
 func TestPlayersFilterSensitiveFields(t *testing.T) {
 	level := 55
 	x, y := 1.0, 2.0
-	client := &fakeClient{players: palworld.Players{Players: []palworld.Player{{Name: "Safe", Level: &level, LocationX: &x, LocationY: &y, IP: "10.0.0.1", PlayerID: "secret-player", UserID: "secret-user"}}}}
-	result := New(client, time.Minute, time.Minute, time.Minute).Players(context.Background())
+	client := &fakeClient{players: palworld.Players{Players: []palworld.Player{{Name: "Safe", Level: &level, LocationX: &x, LocationY: &y, IP: "10.0.0.1", PlayerID: "secret-player", UserID: "steam_1"}}}}
+	result := newStatusService(t, client).Players(context.Background())
 	body, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +67,7 @@ func TestPlayersFilterSensitiveFields(t *testing.T) {
 
 func TestUnavailableDoesNotLeakError(t *testing.T) {
 	client := &fakeClient{err: errors.New("dial 10.0.0.1 with password secret")}
-	result := New(client, time.Minute, time.Minute, time.Minute).Summary(context.Background())
+	result := newStatusService(t, client).Summary(context.Background())
 	if result.Available || result.Error == nil || *result.Error != publicUpstreamError {
 		t.Fatalf("unexpected result: %+v", result)
 	}

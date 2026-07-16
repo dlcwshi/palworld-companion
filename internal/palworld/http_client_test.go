@@ -21,7 +21,7 @@ func TestHTTPClientParsesAndAuthenticates(t *testing.T) {
 		case "/v1/api/metrics":
 			_, _ = w.Write([]byte(`{"serverfps":58.4,"currentplayernum":4,"maxplayernum":50,"uptime":90,"basecampnum":12,"days":326}`))
 		case "/v1/api/players":
-			_, _ = w.Write([]byte(`{"players":[{"name":"P","playerId":"private","userId":"private","ip":"10.0.0.1","ping":35,"location_x":1.5,"location_y":2.5,"level":55}]}`))
+			_, _ = w.Write([]byte(`{"players":[{"name":"P","playerId":"private","userId":"steam_1","ip":"10.0.0.1","ping":35,"location_x":1.5,"location_y":2.5,"level":55}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -53,5 +53,33 @@ func TestHTTPClientRejectsNon2xx(t *testing.T) {
 	c, _ := NewHTTPClient(server.URL, "", "", time.Second)
 	if _, err := c.GetInfo(context.Background()); err == nil {
 		t.Fatal("expected status error")
+	}
+}
+func TestHTTPClientRejectsInvalidPlayerSnapshots(t *testing.T) {
+	bodies := []string{
+		`{}`,
+		`{"players":null}`,
+		`{"players":[`,
+		`{"players":[{"name":"Missing identity"}]}`,
+		`{"players":[{"name":"","userId":"steam_1"}]}`,
+		`{"players":[{"name":"One","userId":"steam_1"},{"name":"Again","userId":"steam_1"}]}`,
+		`{"players":[{"name":"One","userId":"steam_1","playerId":"same"},{"name":"Two","userId":"steam_2","playerId":"same"}]}`,
+		`{"players":[]} {"players":[]}`,
+	}
+	for _, body := range bodies {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		}))
+		client, err := NewHTTPClient(server.URL, "", "", time.Second)
+		if err != nil {
+			server.Close()
+			t.Fatal(err)
+		}
+		_, err = client.GetPlayers(context.Background())
+		server.Close()
+		if err == nil {
+			t.Fatalf("invalid snapshot accepted: %s", body)
+		}
 	}
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/dlcwshi/palworld-companion/internal/auth"
 	"github.com/dlcwshi/palworld-companion/internal/palworld"
+	"github.com/dlcwshi/palworld-companion/internal/roster"
 	"github.com/dlcwshi/palworld-companion/internal/serverstatus"
 	"github.com/dlcwshi/palworld-companion/internal/storage"
 	"github.com/dlcwshi/palworld-companion/internal/tasks"
@@ -68,10 +69,11 @@ func newFixture(t *testing.T, client palworld.Client) *fixture {
 	t.Cleanup(func() { _ = db.Close() })
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
-	status := serverstatus.New(client, time.Minute, time.Minute, time.Minute)
-	service := auth.NewService(auth.NewRepository(db.SQL()), client, time.Hour)
+	playerRoster := roster.NewService(roster.NewRepository(db.SQL()), client, time.Minute)
+	status := serverstatus.New(client, playerRoster, time.Minute, time.Minute)
+	service := auth.NewService(auth.NewRepository(db.SQL()), playerRoster, time.Hour)
 	assets := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<!doctype html><title>Companion</title>")}}
-	return &fixture{handler: New(status, tasks.NewService(tasks.NewRepository(db.SQL())), service, BuildInfo{Name: "Palworld Companion", Version: "0.3.1-dev"}, logger, assets), db: db, logs: logs}
+	return &fixture{handler: New(status, tasks.NewService(tasks.NewRepository(db.SQL())), service, BuildInfo{Name: "Palworld Companion", Version: "0.4.0-dev"}, logger, assets), db: db, logs: logs}
 }
 func jsonRequest(method, path, body string) *http.Request {
 	return httptest.NewRequest(method, path, strings.NewReader(body))
@@ -112,6 +114,19 @@ func TestHealthPublicPlayersAndSPA(t *testing.T) {
 		}
 		if strings.Contains(response.Body.String(), "private") {
 			t.Fatalf("sensitive player leak: %s", response.Body.String())
+		}
+		if route == "/api/v1/server/players" {
+			body := response.Body.String()
+			for _, required := range []string{`"currentStatusKnown":true`, `"status":"online"`, `"lastOnlineAt"`, `"counts"`} {
+				if !strings.Contains(body, required) {
+					t.Fatalf("players response missing %q: %s", required, body)
+				}
+			}
+			for _, forbidden := range []string{"steam_1", "internal", "private-account", `"userId"`, `"playerId"`, `"accountName"`, `"ip"`} {
+				if strings.Contains(body, forbidden) {
+					t.Fatalf("players response leaked %q: %s", forbidden, body)
+				}
+			}
 		}
 	}
 	response := httptest.NewRecorder()

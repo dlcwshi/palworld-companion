@@ -8,11 +8,11 @@
 
 Palworld Companion is a self-hosted, mobile-first PWA for Palworld players. Its Go backend accesses a strict read-only Palworld REST API allowlist, stores Companion-owned accounts and tasks in SQLite, and embeds the Vue frontend in one executable.
 
-**Current repository version: 0.3.1-dev.** This is not a v0.3.1 tag or formal release.
+**Current repository version: 0.4.0-dev.** This is not a v0.4.0 tag or formal release.
 
 ## Current capabilities
 
-- Server dashboard, metrics, and a privacy-filtered online-player list.
+- Server dashboard, metrics, and a privacy-filtered persistent player roster.
 - Mandatory first-run creation of a local administrator.
 - Administrators log in with a local username/password; players can log in with a character name or SteamID64 and local password.
 - Player applications require the character to be online. The backend freshly finds one exact case-sensitive character name and parses its strict `userId=steam_<SteamID64>` identity before administrator approval.
@@ -74,6 +74,14 @@ Open <http://127.0.0.1:8091>. The example uses mock mode and `./data/companion.d
 
 Legacy `auth.enabled`, `public_base_url`, and `admin_steam_ids` keys remain accepted but are unused. `auth.session_ttl` still controls session lifetime.
 
+## Persistent player roster
+
+Version 0.4.0-dev stores every fully validated fresh /players snapshot in the schema 5 SQLite player_roster. The stable identity key is internal palworld_user_id; character names are display and local-login lookup values only. Public responses never include SteamID64, Palworld user/player IDs, account names, IP addresses, or database IDs.
+
+Only a fresh, complete, valid snapshot may change presence and advance player_roster_last_success_at. Upstream failures, malformed payloads, transaction failures, TTL hits, and SQLite fallback never mark everyone offline or extend last-online timestamps. During a failure, the persisted roster remains visible while every current status is unknown; it survives Companion restarts.
+
+Last online means the last successful snapshot in which Companion observed the identity online. This release has no online-duration statistics, history charts, or always-on background poller. Existing home, summary and player requests trigger refreshes, while character registration forces a fresh request and never binds from the persisted roster.
+
 ## API
 
 Public and setup:
@@ -121,9 +129,9 @@ Password-requiring commands fail safely without a TTY.
 
 ## Database upgrade and rollback
 
-Schema 4 adds local usernames, Argon2id password hashes, approval/rejection audit fields, and persistent `system_settings.setup_completed`. Schema 3 user IDs, sessions, users, and tasks are preserved. Legacy Steam users without a password cannot log in until an administrator resets their password. Newer-than-supported schemas are rejected.
+Schema 5 adds the persistent player roster while schema 4 adds local usernames, Argon2id password hashes, approval/rejection audit fields, and persistent `system_settings.setup_completed`. Schema 3 user IDs, sessions, users, and tasks are preserved. Legacy Steam users without a password cannot log in until an administrator resets their password. Newer-than-supported schemas are rejected.
 
-Before upgrading, stop only Companion and back up the executable, configuration, database, WAL, and SHM. Migration failure rolls back and prevents startup. To roll back the binary, restore the pre-upgrade database files as well; an old executable cannot open schema 4.
+Before upgrading, stop only Companion and back up the executable, configuration, database, WAL, and SHM. Migration failure rolls back and prevents startup. To roll back the binary, restore the pre-upgrade database files as well; an old executable cannot open schema 5.
 
 See [docs/deployment.md](docs/deployment.md) for the complete procedure.
 
