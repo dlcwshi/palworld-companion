@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import MetricCard from '@/components/MetricCard.vue'
 import PlayerList from '@/components/PlayerList.vue'
 import { useServerStore } from '@/stores/server'
 import { useTaskStore } from '@/stores/tasks'
@@ -78,26 +77,28 @@ onBeforeUnmount(() => {
       <button class="refresh-button" type="button" :disabled="store.refreshing" aria-label="刷新服务器状态" @click="refreshHome"><span :class="{ spinning: store.refreshing }">↻</span></button>
     </header>
 
-    <section class="status-card">
-      <div class="status-top">
+    <section class="server-overview-card" aria-label="服务器概览">
+      <div class="overview-top">
         <span class="status-badge" :class="status.tone"><i />{{ status.label }}</span>
         <span class="server-version">{{ server?.version ?? '版本未知' }}</span>
       </div>
-      <div class="server-title"><h2>{{ server?.name ?? '等待服务器响应' }}</h2></div>
-      <div class="online-total">
-        <strong>{{ number(server?.onlinePlayers) }}</strong>
-        <span>/ {{ number(server?.maxPlayers) }} {{ server?.onlinePlayersKnown ? '在线' : '当前在线状态未知' }}</span>
+      <div class="overview-main">
+        <div class="overview-title"><h2>{{ server?.name ?? '等待服务器响应' }}</h2></div>
+        <div class="overview-online">
+          <strong>{{ number(server?.onlinePlayers) }}</strong>
+          <span>/ {{ number(server?.maxPlayers) }} {{ server?.onlinePlayersKnown ? '在线' : '状态未知' }}</span>
+        </div>
+      </div>
+      <div class="overview-metrics" aria-label="服务器指标">
+        <div class="overview-metric accent"><span aria-label="服务器 FPS">FPS</span><strong>{{ number(server?.fps, 1) }}</strong></div>
+        <div class="overview-metric"><span aria-label="运行时间">运行</span><strong class="runtime-value">{{ uptime }}</strong></div>
+        <div class="overview-metric"><span aria-label="世界天数">天数</span><strong>{{ number(server?.worldDays) }}</strong></div>
+        <div class="overview-metric"><span aria-label="基地数量">基地</span><strong>{{ number(server?.baseCount) }}</strong></div>
       </div>
     </section>
 
     <div v-if="pageNotice" class="notice" :class="pageNotice.tone">{{ pageNotice.text }}</div>
 
-    <section class="metrics-grid">
-      <MetricCard label="服务器 FPS" :value="number(server?.fps, 1)" accent />
-      <MetricCard label="运行时间" :value="uptime" />
-      <MetricCard label="世界天数" :value="number(server?.worldDays)" />
-      <MetricCard label="基地数量" :value="number(server?.baseCount)" />
-    </section>
 
     <section class="task-summary section-block">
       <div class="section-heading">

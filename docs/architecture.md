@@ -1,6 +1,6 @@
 # 架构
 
-Palworld Companion 0.4.5-dev 是单体、自托管应用。Vue PWA 嵌入纯 Go 二进制；账号、Session 和任务属于 Companion 自身 SQLite，浏览器不会接触 Palworld REST API 凭据。
+Palworld Companion 0.4.6-dev 是单体、自托管应用。Vue PWA 嵌入纯 Go 二进制；账号、Session 和任务属于 Companion 自身 SQLite，浏览器不会接触 Palworld REST API 凭据。
 
 ```mermaid
 flowchart LR

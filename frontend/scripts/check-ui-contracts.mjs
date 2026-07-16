@@ -19,6 +19,15 @@ assert(!home.includes('class="description"'), 'home still renders a server descr
 for (const expected of ['status.label', 'server?.version', 'server?.name', 'server?.onlinePlayers', 'server?.maxPlayers']) {
   assert(home.includes(expected), `home server card is missing ${expected}`)
 }
+assert.equal((home.match(/class="server-overview-card"/g) ?? []).length, 1, 'home must render one server overview container')
+assert(!home.includes('<MetricCard'), 'home must not render separate metric cards')
+assert(!home.includes('class="metrics-grid"'), 'home must not render a separate metrics grid')
+for (const expected of ['overview-top', 'overview-main', 'overview-online', 'overview-metrics', '服务器 FPS', '运行时间', '世界天数', '基地数量']) {
+  assert(home.includes(expected), `home server overview is missing ${expected}`)
+}
+const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
+assert(styles.includes('grid-template-columns: repeat(4, minmax(0,1fr))'), 'server metrics must use four columns at normal mobile widths')
+assert(styles.includes('@media (max-width: 359px)'), 'two-column metric fallback must be limited to very narrow screens')
 assert(home.includes('APP_VERSION_LABEL'), 'home does not use the shared version label')
 
 console.log('UI contract checks passed')
