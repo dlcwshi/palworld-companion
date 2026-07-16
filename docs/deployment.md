@@ -166,3 +166,19 @@ PWA Service Worker 的 navigation fallback 排除整个 `/api/`，不会缓存 s
 - 公网 HTTP 首页继续返回 301 到 HTTPS；HTTPS 首页、静态资源、manifest、Service Worker 和 API 正常。旧 Steam 路由返回 HTTP 410，未认证任务接口返回 HTTP 401；公共玩家字段检查无 SteamID、Palworld userId/playerId、accountName、IP 或内部 ID，summary 在线人数与名册 `currentOnline` 一致。部署后日志未发现密码、Cookie、Authorization、Session token、OpenID/Steam 域名或 panic、fatal、迁移、外键错误。
 - 本次仅停止并启动 `palworld-companion.service`。`palworld-server.service` 保持 PID `113468`、active 时间 `2026-07-15 09:35:34 UTC`；`palworld-pst.service` 保持 PID `107527`、active 时间 `2026-07-15 01:48:58 UTC`。未修改或重启 PalServer/PST，未修改 Nginx、FRP、防火墙、8212、配置或存档，未执行 `clean-seeds`，未使用 Docker。
 - 仍需真人验收：实体手机已安装 PWA 从旧版本重新打开后的最终体验；个人任务与共享任务同时存在时的实体手机视觉；两名真实玩家一在线一离线时的名册；真实上游状态未知提示；底部导航和长角色名在实体手机上的显示。
+
+## 2026-07-16 v0.4.2-dev 移动首页与登录回跳部署记录
+
+- 部署源码提交为 `bcec2440777f1f976f869eef8fc3e2e6edb90534`，版本为 `0.4.2-dev`，构建时间为 `2026-07-16T06:34:25Z`。Linux AMD64 纯 Go 制品使用 `CGO_ENABLED=0` 构建，大小为 `11288760` 字节，SHA-256 为 `cc86db1c5890e2b8d5f7c29c52ece6ffc0c91dced4ae91db84b5d42bcf5da85c`；已核验上传制品保留在 `/tmp/palworld-companion-bcec244`。
+- 更新前备份位于 `/root/palworld-companion-backup-20260716-063715`，包含旧二进制、配置、unit 和停止服务后的 `companion.db`。停服后 WAL/SHM 均不存在；未发生回滚。`/etc/palworld-companion/config.yaml` 部署前后 SHA-256 均为 `194a975a1e55fa0be3e6d3c5f9e1a3239abbce4dff1d8302752287b7989df58e`。
+- SQLite 保持 schema 5 和 WAL。部署前后均为 `users=2`、`sessions=6`、`tasks=3`、`auth_flows=5`、`player_roster=1`，`setup_completed=true`、`setupRequired=false`，`PRAGMA foreign_key_check=0`；现有用户、Session、任务、名册和 Setup 状态未丢失或重置。
+- Companion 服务保持 enabled、active 和 running，部署后 PID 为 `146426`，active 时间为 `2026-07-16 06:37:16 UTC`。health 和 system version 返回 `0.4.2-dev`、完整源码提交及正确构建时间。首次启动后的即时探测早于端口监听而未连接，随后带就绪重试的完整验收通过，未触发回滚。
+- 生产首页引用 `/assets/index-8b2M7UxY.js` 与 `/assets/index-BtcA7pn1.css`，SHA-256 分别为 `23b26c425eee9a82e6e2fce2db6979c3040ec31dece23a1cdecd7e50ae2c4814` 与 `183b0cc331892322753f99bc7aa006a9cb44ed0bb98fc419cd78b65123ce7e20`；Service Worker SHA-256 为 `b6668edee1706c30dfc066d232dfe73199bd29e1ce540610ff6d4ccf3fd07e09`，manifest SHA-256 为 `feddf9b3363cdfee99f27656c74e14d2ff9037c4fa57dfee13d31995f56f72e1`。Manifest 为 `start_url=/`、`scope=/`、`display=standalone`；Worker 包含 `skipWaiting` 与 `clientsClaim`，不预缓存 `/api/`。
+- `index.html`、manifest 和 `sw.js` 继续返回 `Cache-Control: no-cache`，哈希 assets 返回 `public, max-age=31536000, immutable`。保留的公网浏览器会话打开后约 2 秒自动显示 `V0.4.2 DEV`，再次刷新仍稳定显示新首页、任务和玩家，控制台无错误或无限刷新；实体手机已安装 PWA 的最终自动更新仍需真人确认。
+- 登录回跳在隔离本地实例完成实际交互验证：直接登录进入 `/`；未登录恢复 `/account` 先进入无 `returnTo` 的 `/login`，登录后进入 `/`；明确访问 `/tasks` 登录后返回 `/tasks`；外部 URL 被忽略并进入 `/`。生产未填写真实密码，确认未认证访问 `/account` 最终进入不带回跳参数的 `/login`。刷新后本地测试 Session 保留。
+- 390×844 实测品牌区高 `50px`、标题约 `34px`、刷新按钮 `44×44px`、服务器卡 `218px`、四张指标卡均为 `100px`，任务标题顶边为 `548px`；生产同尺寸服务器卡为 `187px`、任务标题顶边为 `516px`。412×915 与 430×932 的任务标题顶边分别为 `555px`、`559px`。三档均无横向溢出，刷新按钮键盘焦点为 3px 可见轮廓；底部导航高 `68px`，页面保留 `84px` 加 safe-area 的底部空间。
+- 账户页自动化浏览器验收确认不再显示“安全边界”、Argon2id、Cookie 属性或 Token 哈希技术卡片，仅保留账号信息、修改密码、退出、管理员入口和弱化版本文字。生产 JS/CSS 与该本地验收构建的哈希完全一致。
+- 自动测试新增登录返回目标白名单与公共离线名册回归：A、B 首次成功快照均在线，后续仅 A 在线时公共响应仍返回 A、B，`counts.total=2`、`currentOnline=1`，B 为 offline、ping/position 为 null 且最后在线时间保留。生产名册实际仍只有 1 人，未修改真实数据库制造离线玩家。
+- 公网 HTTP 首页继续 301 跳转 HTTPS；HTTPS 首页、登录、注册、health、manifest 和 Service Worker 均返回 200。旧 Steam 路由继续返回 410，未认证任务接口返回 401；公共玩家键仅含 `name`、`level`、`status`、`lastKnownStatus`、`lastOnlineAt`、`ping`、`position`，未发现内部身份字段。部署后日志未命中密码、Cookie、Authorization、Session token、OpenID/Steam 域名或 panic、fatal、迁移、外键错误。
+- 本次仅停止并启动 `palworld-companion.service`。`palworld-server.service` 保持 PID `113468`、active 时间 `2026-07-15 09:35:34 UTC`；`palworld-pst.service` 保持 PID `107527`、active 时间 `2026-07-15 01:48:58 UTC`。未修改或重启 PalServer/PST，未修改 Nginx、FRP、防火墙、8212、配置或存档，未执行 `clean-seeds`，未使用 Docker。
+- 仍需真人验收：实体手机已安装 PWA 自动更新至 0.4.2-dev、实体 PWA Session 失效后登录直接进入首页、普通真实账号浏览器登录、手机首屏主观密度、长服务器名和长角色名、第二名真实玩家上线后名册变为共 2 人及其退出后继续保留离线，以及 Android 手势条不遮挡底部导航。
