@@ -1,6 +1,6 @@
 # 架构
 
-Palworld Companion 0.4.0-dev 是单体、自托管应用。Vue PWA 嵌入纯 Go 二进制；账号、Session 和任务属于 Companion 自身 SQLite，浏览器不会接触 Palworld REST API 凭据。
+Palworld Companion 0.4.1-dev 是单体、自托管应用。Vue PWA 嵌入纯 Go 二进制；账号、Session 和任务属于 Companion 自身 SQLite，浏览器不会接触 Palworld REST API 凭据。
 
 ```mermaid
 flowchart LR
@@ -58,8 +58,10 @@ internal/roster 在事务外请求并校验整份新鲜快照，在同一 SQLite
 
 公开玩家 DTO 只包含角色名、等级、在线/未知状态、最后在线时间，以及仅在当前新鲜在线快照中存在的 ping/position。SteamID64、Palworld userId/playerId、accountName、IP 和数据库 ID 仅出现在当前账号或管理员接口，不进入公共玩家响应。
 
-任务查询在 SQL 层按 actor 和 visibility 过滤，并由 service 重复校验管理权限。玩家无法读取其他人的个人任务；共享任务只有创建者或管理员能写；无权对象统一返回 404。
+任务查询在 SQL 层按 actor 和 visibility 过滤，并由 service 重复校验管理权限。玩家无法读取其他人的个人任务；共享任务只有创建者或管理员能写；无权对象统一返回 404。首页只加载一次当前用户可见的未完成任务，由纯函数先按任务 ID 去重，再把 owner 为当前用户的 personal 任务与全部 shared 任务互斥分类，最后应用每组预览限制。
 
 管理员写接口重新验证当前 active Session 与 admin 角色。当前管理员不能禁用或删除自己；最后一个 active 管理员不能被禁用、删除或降级。禁用、删除和密码重置都会撤销目标 Session。
 
-Service Worker 的 navigation fallback 拒绝整个 `/api/`，没有认证、初始化、注册、任务或管理员响应进入缓存。
+前端生产构建以 `emptyOutDir` 清空并重新生成 `web/dist`，构建后脚本验证首页新文案、哈希资源存在以及 Service Worker 预缓存引用；Makefile 的 Go 构建依赖该前端构建，因此 embed 只读取本次产物。
+
+PWA 只注册一个 Service Worker，采用 `autoUpdate`、`skipWaiting` 和 `clientsClaim`。注册时、窗口恢复可见、网络恢复和每小时时检查更新；新 Worker 激活后标准注册逻辑只刷新一次，不清除登录 Cookie。navigation fallback 拒绝整个 `/api/`，runtime cache 为空，没有认证、初始化、注册、任务或管理员响应进入缓存。Go 静态处理器对 index、manifest 和 Service Worker 使用 `no-cache`，对哈希 assets 使用 immutable 长缓存。

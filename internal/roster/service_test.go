@@ -91,7 +91,7 @@ VALUES('hash','1','steam_1','old-player','Old Alpha','old-account','player','act
 		{Name: "Alpha Renamed", UserID: "steam_1", PlayerID: "player-1-new", AccountName: "account-new", Level: level(55)},
 	}}, nil)
 	second := service.Players(context.Background())
-	if len(second.Players) != 2 || second.Players[0].Name != "Alpha Renamed" || second.Players[0].Level != 55 || second.Players[1].Name != "Beta" || second.Players[1].Status != StatusOffline {
+	if len(second.Players) != 2 || second.Players[0].Name != "Alpha Renamed" || second.Players[0].Level != 55 || second.Players[1].Name != "Beta" || second.Players[1].Status != StatusOffline || second.Players[1].Ping != nil || second.Players[1].Position != nil {
 		t.Fatalf("second=%+v", second)
 	}
 	betaLastOnline := second.Players[1].LastOnlineAt
@@ -137,7 +137,7 @@ func TestFailuresCacheRestartAndEmptySynchronizationSemantics(t *testing.T) {
 	now = now.Add(time.Second)
 	client.set(palworld.Players{}, errors.New("down"))
 	failed := service.Players(context.Background())
-	if failed.CurrentStatusKnown || !failed.Stale || failed.Players[0].Status != StatusUnknown || failed.Players[0].LastKnownStatus != StatusOnline || !failed.Players[0].LastOnlineAt.Equal(firstOnline) {
+	if failed.CurrentStatusKnown || !failed.Stale || failed.Players[0].Status != StatusUnknown || failed.Players[0].LastKnownStatus != StatusOnline || !failed.Players[0].LastOnlineAt.Equal(firstOnline) || failed.Players[0].Ping != nil || failed.Players[0].Position != nil {
 		t.Fatalf("failed=%+v", failed)
 	}
 	var lastSuccess string

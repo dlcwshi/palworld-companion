@@ -1,13 +1,15 @@
 {
   "name": "palworld-companion-frontend",
   "private": true,
-  "version": "0.4.0-dev",
+  "version": "0.4.1-dev",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run type-check && vite build",
+    "build": "npm run type-check && npm run test:home && vite build && npm run verify-build",
     "type-check": "vue-tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:home": "node scripts/check-home-task-groups.mjs",
+    "verify-build": "node scripts/verify-build.mjs"
   },
   "dependencies": {
     "pinia": "^3.0.4",

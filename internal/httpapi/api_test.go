@@ -72,8 +72,13 @@ func newFixture(t *testing.T, client palworld.Client) *fixture {
 	playerRoster := roster.NewService(roster.NewRepository(db.SQL()), client, time.Minute)
 	status := serverstatus.New(client, playerRoster, time.Minute, time.Minute)
 	service := auth.NewService(auth.NewRepository(db.SQL()), playerRoster, time.Hour)
-	assets := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<!doctype html><title>Companion</title>")}}
-	return &fixture{handler: New(status, tasks.NewService(tasks.NewRepository(db.SQL())), service, BuildInfo{Name: "Palworld Companion", Version: "0.4.0-dev"}, logger, assets), db: db, logs: logs}
+	assets := fstest.MapFS{
+		"index.html":             &fstest.MapFile{Data: []byte("<!doctype html><title>Companion</title>")},
+		"sw.js":                  &fstest.MapFile{Data: []byte("self.skipWaiting()")},
+		"manifest.webmanifest":   &fstest.MapFile{Data: []byte(`{"name":"Companion"}`)},
+		"assets/app-deadbeef.js": &fstest.MapFile{Data: []byte("console.log('app')")},
+	}
+	return &fixture{handler: New(status, tasks.NewService(tasks.NewRepository(db.SQL())), service, BuildInfo{Name: "Palworld Companion", Version: "0.4.1-dev"}, logger, assets), db: db, logs: logs}
 }
 func jsonRequest(method, path, body string) *http.Request {
 	return httptest.NewRequest(method, path, strings.NewReader(body))
@@ -133,6 +138,26 @@ func TestHealthPublicPlayersAndSPA(t *testing.T) {
 	f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/account", nil))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Companion") {
 		t.Fatalf("spa=%d", response.Code)
+	}
+}
+
+func TestFrontendCacheHeaders(t *testing.T) {
+	f := newFixture(t, mockClient{})
+	for _, test := range []struct {
+		path string
+		want string
+	}{
+		{path: "/", want: "no-cache"},
+		{path: "/account", want: "no-cache"},
+		{path: "/sw.js", want: "no-cache"},
+		{path: "/manifest.webmanifest", want: "no-cache"},
+		{path: "/assets/app-deadbeef.js", want: "public, max-age=31536000, immutable"},
+	} {
+		response := httptest.NewRecorder()
+		f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.path, nil))
+		if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != test.want {
+			t.Errorf("%s: status=%d cache=%q", test.path, response.Code, response.Header().Get("Cache-Control"))
+		}
 	}
 }
 

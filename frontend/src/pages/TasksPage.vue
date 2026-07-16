@@ -73,7 +73,7 @@ onMounted(async () => {
 <template>
   <div class="tasks-page">
     <header class="task-page-header">
-      <div><p class="eyebrow">TONIGHT · SQLITE</p><h1>今晚任务</h1><p>把今晚要完成的事放在这里，重启后仍会保留。</p></div>
+      <div><p class="eyebrow">TASKS · SQLITE</p><h1>任务</h1><p>把想完成的事放在这里，重启后仍会保留。</p></div>
       <button class="round-add-button" type="button" aria-label="新建任务" @click="startNew">＋</button>
     </header>
     <section v-if="!auth.authenticated" class="prose-card"><h2>请先登录</h2><p>管理员使用本地用户名登录；玩家可使用角色名或 SteamID64 登录。</p><RouterLink class="primary-button" to="/login?returnTo=/tasks">登录</RouterLink></section>
@@ -87,7 +87,7 @@ onMounted(async () => {
         <label v-if="editingId==null">可见范围<select v-model="visibility"><option value="personal">仅自己可见</option><option value="shared">全服共享</option></select></label>
         <label v-if="editingId != null">排序值<input v-model.number="sortOrder" type="number" inputmode="numeric" /><small>数值越小越靠前</small></label>
         <p v-if="formError" class="form-error">{{ formError }}</p>
-        <button class="primary-button" type="submit" :disabled="store.saving">{{ store.saving ? '正在保存…' : editingId == null ? '添加到今晚' : '保存修改' }}</button>
+        <button class="primary-button" type="submit" :disabled="store.saving">{{ store.saving ? '正在保存…' : editingId == null ? '添加任务' : '保存修改' }}</button>
       </form>
 
       <div class="task-filter" role="group" aria-label="筛选任务">
@@ -97,9 +97,9 @@ onMounted(async () => {
       <div v-if="store.error" class="notice danger">{{ store.error }} <button class="inline-retry" type="button" @click="store.load(filter)">重试</button></div>
       <div v-if="store.loading" class="empty-state">正在加载任务…</div>
       <div v-else-if="store.tasks.length === 0" class="task-empty">
-        <span>✓</span><h2>这里还没有任务</h2><p>添加第一件今晚想完成的事。</p><button class="secondary-button" type="button" @click="startNew">新建任务</button>
+        <span>✓</span><h2>这里还没有任务</h2><p>添加第一件想完成的事。</p><button class="secondary-button" type="button" @click="startNew">新建任务</button>
       </div>
-      <section v-else class="task-list" aria-label="今晚任务列表">
+      <section v-else class="task-list" aria-label="任务列表">
         <article v-for="task in store.tasks" :key="task.id" class="task-row" :class="{ completed: task.status === 'completed' }">
           <template v-if="task.canManage">
             <button class="task-check" type="button" :aria-label="task.status === 'pending' ? '标记完成' : '恢复未完成'" :disabled="store.saving" @click="toggle(task)">{{ task.status === 'completed' ? '✓' : '' }}</button>

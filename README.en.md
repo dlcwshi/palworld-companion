@@ -8,7 +8,7 @@
 
 Palworld Companion is a self-hosted, mobile-first PWA for Palworld players. Its Go backend accesses a strict read-only Palworld REST API allowlist, stores Companion-owned accounts and tasks in SQLite, and embeds the Vue frontend in one executable.
 
-**Current repository version: 0.4.0-dev.** This is not a v0.4.0 tag or formal release.
+**Current repository version: 0.4.1-dev.** This is not a v0.4.1 tag or formal release.
 
 ## Current capabilities
 
@@ -17,8 +17,8 @@ Palworld Companion is a self-hosted, mobile-first PWA for Palworld players. Its 
 - Administrators log in with a local username/password; players can log in with a character name or SteamID64 and local password.
 - Player applications require the character to be online. The backend freshly finds one exact case-sensitive character name and parses its strict `userId=steam_<SteamID64>` identity before administrator approval.
 - Approval, rejection, disable, soft delete, restore, role management, session revocation, and password reset.
-- Personal and shared tasks with SQL- and service-level authorization.
-- Mobile-first PWA, SQLite WAL, pure-Go Linux AMD64 binary, and systemd deployment.
+- Personal and shared tasks with SQL- and service-level authorization and mutually exclusive, deduplicated home groups.
+- Auto-updating mobile-first PWA, SQLite WAL, pure-Go Linux AMD64 binary, and systemd deployment.
 
 The server derives SteamID64 from the online player identity and keeps it as a compatible login identifier. Steam OpenID is disabled. Companion does not contact `steamcommunity.com`, the Steam Web API, or an external authentication broker.
 
@@ -55,7 +55,8 @@ See [docs/security.md](docs/security.md) and [docs/architecture.md](docs/archite
 - A player cannot list or access another player's personal tasks, including by ID.
 - Shared tasks are visible to every authenticated user and editable only by their creator or an administrator.
 - Administrators can manage all tasks. Unauthorized object access returns 404.
-- Schema 4 preserves existing `owner_id`, `created_by`, and `visibility` data.
+- Schema 5 preserves existing `owner_id`, `created_by`, and `visibility` data.
+- The home page derives both groups from one `scope=visible,status=pending` result: it deduplicates by stable task ID, then assigns the current user's personal tasks and all shared tasks to mutually exclusive groups.
 
 ## Quick start
 
@@ -76,11 +77,19 @@ Legacy `auth.enabled`, `public_base_url`, and `admin_steam_ids` keys remain acce
 
 ## Persistent player roster
 
-Version 0.4.0-dev stores every fully validated fresh /players snapshot in the schema 5 SQLite player_roster. The stable identity key is internal palworld_user_id; character names are display and local-login lookup values only. Public responses never include SteamID64, Palworld user/player IDs, account names, IP addresses, or database IDs.
+Version 0.4.1-dev stores every fully validated fresh /players snapshot in the schema 5 SQLite player_roster. The stable identity key is internal palworld_user_id; character names are display and local-login lookup values only. Public responses never include SteamID64, Palworld user/player IDs, account names, IP addresses, or database IDs.
 
 Only a fresh, complete, valid snapshot may change presence and advance player_roster_last_success_at. Upstream failures, malformed payloads, transaction failures, TTL hits, and SQLite fallback never mark everyone offline or extend last-online timestamps. During a failure, the persisted roster remains visible while every current status is unknown; it survives Companion restarts.
 
 Last online means the last successful snapshot in which Companion observed the identity online. This release has no online-duration statistics, history charts, or always-on background poller. Existing home, summary and player requests trigger refreshes, while character registration forces a fresh request and never binds from the persisted roster.
+
+The home page shows the complete persistent roster by default and filters the existing response locally by All, Online, or Offline. Unknown presence returns to All and keeps every historical player visible. Ordinary TTL hits update normally without exposing cache implementation labels.
+
+## PWA updates
+
+The production build empties and regenerates `web/dist`, then verifies the home bundle, hashed assets, and service-worker precache before Go embeds that same directory. The PWA uses `autoUpdate`, `skipWaiting`, and `clientsClaim`; it checks on launch, foreground return, network recovery, and hourly, and the standard registration reloads once when the updated worker activates. Secure/HttpOnly login cookies are not cleared.
+
+`index.html`, the manifest, and `sw.js` use `no-cache` revalidation, while content-hashed `/assets/` are long-lived and immutable. The service worker neither precaches `/api/` nor adds an API runtime cache.
 
 ## API
 

@@ -232,6 +232,7 @@ func (a *API) frontend(w http.ResponseWriter, r *http.Request) {
 		clean = "index.html"
 	}
 	if file, err := fs.Stat(a.assets, clean); err == nil && !file.IsDir() {
+		setFrontendCacheHeaders(w, clean)
 		a.static.ServeHTTP(w, r)
 		return
 	}
@@ -240,8 +241,16 @@ func (a *API) frontend(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	setFrontendCacheHeaders(w, "index.html")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(index)
+}
+func setFrontendCacheHeaders(w http.ResponseWriter, name string) {
+	if strings.HasPrefix(name, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
 }
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
