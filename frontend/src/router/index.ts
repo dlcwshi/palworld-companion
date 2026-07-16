@@ -8,6 +8,7 @@ import AccountPage from '@/pages/AccountPage.vue'
 import AdminUsersPage from '@/pages/AdminUsersPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
 import { useAuthStore } from '@/stores/auth'
+import { resolvePostLoginPath } from '@/utils/postLogin'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -31,7 +32,10 @@ router.beforeEach(async (to) => {
   }
   if (auth.setupRequired && to.name !== 'setup') return { name: 'setup' }
   if (!auth.setupRequired && to.name === 'setup') return { name: auth.authenticated ? 'home' : 'login' }
-  if ((to.meta.requiresAuth || to.meta.requiresAdmin) && !auth.authenticated) return { name: 'login', query: { returnTo: to.fullPath } }
+  if ((to.meta.requiresAuth || to.meta.requiresAdmin) && !auth.authenticated) {
+    const returnTo = resolvePostLoginPath(to.fullPath)
+    return returnTo === '/' ? { name: 'login' } : { name: 'login', query: { returnTo } }
+  }
   if (to.meta.requiresAdmin && !auth.isAdmin) return { name: 'home' }
-  if ((to.name === 'login' || to.name === 'register') && auth.authenticated) return { name: 'tasks' }
+  if ((to.name === 'login' || to.name === 'register') && auth.authenticated) return { name: 'home' }
 })

@@ -61,6 +61,10 @@ type fixture struct {
 }
 
 func newFixture(t *testing.T, client palworld.Client) *fixture {
+	return newFixtureWithRosterTTL(t, client, time.Minute)
+}
+
+func newFixtureWithRosterTTL(t *testing.T, client palworld.Client, rosterTTL time.Duration) *fixture {
 	t.Helper()
 	db, err := storage.Open(filepath.Join(t.TempDir(), "api.db"))
 	if err != nil {
@@ -69,7 +73,7 @@ func newFixture(t *testing.T, client palworld.Client) *fixture {
 	t.Cleanup(func() { _ = db.Close() })
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
-	playerRoster := roster.NewService(roster.NewRepository(db.SQL()), client, time.Minute)
+	playerRoster := roster.NewService(roster.NewRepository(db.SQL()), client, rosterTTL)
 	status := serverstatus.New(client, playerRoster, time.Minute, time.Minute)
 	service := auth.NewService(auth.NewRepository(db.SQL()), playerRoster, time.Hour)
 	assets := fstest.MapFS{
@@ -78,7 +82,7 @@ func newFixture(t *testing.T, client palworld.Client) *fixture {
 		"manifest.webmanifest":   &fstest.MapFile{Data: []byte(`{"name":"Companion"}`)},
 		"assets/app-deadbeef.js": &fstest.MapFile{Data: []byte("console.log('app')")},
 	}
-	return &fixture{handler: New(status, tasks.NewService(tasks.NewRepository(db.SQL())), service, BuildInfo{Name: "Palworld Companion", Version: "0.4.1-dev"}, logger, assets), db: db, logs: logs}
+	return &fixture{handler: New(status, tasks.NewService(tasks.NewRepository(db.SQL())), service, BuildInfo{Name: "Palworld Companion", Version: "0.4.2-dev"}, logger, assets), db: db, logs: logs}
 }
 func jsonRequest(method, path, body string) *http.Request {
 	return httptest.NewRequest(method, path, strings.NewReader(body))
@@ -141,6 +145,58 @@ func TestHealthPublicPlayersAndSPA(t *testing.T) {
 	}
 }
 
+func TestPublicPlayersRetainsOfflineRoster(t *testing.T) {
+	ping, x, y := 41.5, 10.0, -20.0
+	client := &sequenceClient{players: []palworld.Players{
+		{Players: []palworld.Player{
+			{Name: "Alpha", UserID: "steam_1"},
+			{Name: "Beta", UserID: "steam_2", Ping: &ping, LocationX: &x, LocationY: &y},
+		}},
+		{Players: []palworld.Player{{Name: "Alpha", UserID: "steam_1"}}},
+	}}
+	f := newFixtureWithRosterTTL(t, client, 0)
+	requestPlayers := func() roster.Response {
+		response := httptest.NewRecorder()
+		f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/server/players", nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("players=%d %s", response.Code, response.Body.String())
+		}
+		var payload roster.Response
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+
+	first := requestPlayers()
+	if first.Counts.Total != 2 || first.Counts.CurrentOnline == nil || *first.Counts.CurrentOnline != 2 {
+		t.Fatalf("first=%+v", first)
+	}
+	var betaLastOnline time.Time
+	for _, player := range first.Players {
+		if player.Name == "Beta" {
+			betaLastOnline = player.LastOnlineAt
+		}
+	}
+	if betaLastOnline.IsZero() {
+		t.Fatal("Beta missing from first public response")
+	}
+
+	second := requestPlayers()
+	if second.Counts.Total != 2 || second.Counts.CurrentOnline == nil || *second.Counts.CurrentOnline != 1 || len(second.Players) != 2 {
+		t.Fatalf("second=%+v", second)
+	}
+	for _, player := range second.Players {
+		if player.Name != "Beta" {
+			continue
+		}
+		if player.Status != roster.StatusOffline || player.Ping != nil || player.Position != nil || !player.LastOnlineAt.Equal(betaLastOnline) {
+			t.Fatalf("offline Beta=%+v", player)
+		}
+		return
+	}
+	t.Fatal("offline Beta missing from public response")
+}
 func TestFrontendCacheHeaders(t *testing.T) {
 	f := newFixture(t, mockClient{})
 	for _, test := range []struct {

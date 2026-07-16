@@ -73,8 +73,8 @@ onBeforeUnmount(() => {
 <template>
   <div class="home-page">
     <header class="hero-header">
-      <div><p class="eyebrow">SELF-HOSTED · V0.4.1 DEV</p><h1>Palworld<br /><em>Companion</em></h1></div>
-      <button class="refresh-button" type="button" :disabled="store.refreshing" aria-label="刷新" @click="refreshHome"><span :class="{ spinning: store.refreshing }">↻</span></button>
+      <div class="hero-brand"><p class="eyebrow">SELF-HOSTED · V0.4.2 DEV</p><h1><span>Palworld</span><br class="title-break" /><em>Companion</em></h1></div>
+      <button class="refresh-button" type="button" :disabled="store.refreshing" aria-label="刷新服务器状态" @click="refreshHome"><span :class="{ spinning: store.refreshing }">↻</span></button>
     </header>
 
     <section class="status-card">

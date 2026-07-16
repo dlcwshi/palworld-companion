@@ -11,10 +11,10 @@ await Promise.all(assetPaths.map((path) => access(resolve(dist, path))))
 
 const textAssets = await Promise.all(assetPaths.filter((path) => /\.(?:js|css)$/.test(path)).map((path) => readFile(resolve(dist, path), 'utf8')))
 const bundle = textAssets.join('\n')
-for (const expected of ['TASKS', 'PLAYERS', 'V0.4.1 DEV', '个人任务', '共享任务']) {
+for (const expected of ['TASKS', 'PLAYERS', 'V0.4.2 DEV', '个人任务', '共享任务']) {
   assert(bundle.includes(expected), `production bundle is missing ${expected}`)
 }
-for (const obsolete of ['TONIGHT', '今晚任务', '在线玩家', '缓存命中', '显示缓存数据']) {
+for (const obsolete of ['TONIGHT', '今晚任务', '在线玩家', '缓存命中', '显示缓存数据', '安全边界', 'V0.4.1 DEV']) {
   assert(!bundle.includes(obsolete), `production bundle still contains ${obsolete}`)
 }
 

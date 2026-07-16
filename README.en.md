@@ -8,7 +8,7 @@
 
 Palworld Companion is a self-hosted, mobile-first PWA for Palworld players. Its Go backend accesses a strict read-only Palworld REST API allowlist, stores Companion-owned accounts and tasks in SQLite, and embeds the Vue frontend in one executable.
 
-**Current repository version: 0.4.1-dev.** This is not a v0.4.1 tag or formal release.
+**Current repository version: 0.4.2-dev.** This is not a v0.4.1 tag or formal release.
 
 ## Current capabilities
 
@@ -39,6 +39,8 @@ Setup never reopens automatically, even if administrators later become unusable.
 5. After administrator approval, the player can log in with the character name or SteamID64. Existing active users can log in while offline or while the Palworld API is unavailable.
 
 Pending, disabled, rejected, and deleted users cannot log in. Unique SteamID64, Palworld userId, and stable playerId constraints prevent repeated applications from bypassing state.
+
+A successful login returns to `/` by default. Only an explicitly requested `/tasks` or administrator-users page retains an internal return target. Account, authentication, setup, unknown, and external targets all resolve to home, so a PWA restored on an expired `/account` session does not reopen the password page after login.
 
 ## Passwords and sessions
 
@@ -77,7 +79,7 @@ Legacy `auth.enabled`, `public_base_url`, and `admin_steam_ids` keys remain acce
 
 ## Persistent player roster
 
-Version 0.4.1-dev stores every fully validated fresh /players snapshot in the schema 5 SQLite player_roster. The stable identity key is internal palworld_user_id; character names are display and local-login lookup values only. Public responses never include SteamID64, Palworld user/player IDs, account names, IP addresses, or database IDs.
+Version 0.4.2-dev stores every fully validated fresh /players snapshot in the schema 5 SQLite player_roster. The stable identity key is internal palworld_user_id; character names are display and local-login lookup values only. Public responses never include SteamID64, Palworld user/player IDs, account names, IP addresses, or database IDs.
 
 Only a fresh, complete, valid snapshot may change presence and advance player_roster_last_success_at. Upstream failures, malformed payloads, transaction failures, TTL hits, and SQLite fallback never mark everyone offline or extend last-online timestamps. During a failure, the persisted roster remains visible while every current status is unknown; it survives Companion restarts.
 
@@ -88,6 +90,8 @@ The home page shows the complete persistent roster by default and filters the ex
 ## PWA updates
 
 The production build empties and regenerates `web/dist`, then verifies the home bundle, hashed assets, and service-worker precache before Go embeds that same directory. The PWA uses `autoUpdate`, `skipWaiting`, and `clientsClaim`; it checks on launch, foreground return, network recovery, and hourly, and the standard registration reloads once when the updated worker activates. Secure/HttpOnly login cookies are not cleared.
+
+The manifest fixes both `start_url` and `scope` at `/`. Below 640px, the home page compacts the brand, server status, and 2×2 metrics while preserving at least 44px touch targets, safe-area spacing, and the existing task/roster behavior. The account page now contains only user-facing account, password, logout, and administrator entry controls; password and cookie implementation details remain in the security documentation.
 
 `index.html`, the manifest, and `sw.js` use `no-cache` revalidation, while content-hashed `/assets/` are long-lived and immutable. The service worker neither precaches `/api/` nor adds an API runtime cache.
 

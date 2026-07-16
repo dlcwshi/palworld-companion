@@ -60,9 +60,10 @@ func rosterFixture(t *testing.T, client palworld.Client, ttl time.Duration) (*st
 func level(value int) *int { return &value }
 
 func TestSynchronizationLifecycleAndBoundUserUpdates(t *testing.T) {
+	ping, x, y := 42.5, 12.5, -4.5
 	client := &testClient{snapshot: palworld.Players{Players: []palworld.Player{
 		{Name: "Alpha", UserID: "steam_1", PlayerID: "player-1", AccountName: "account-1", Level: level(10)},
-		{Name: "Beta", UserID: "steam_2", PlayerID: "player-2", AccountName: "account-2", Level: level(20)},
+		{Name: "Beta", UserID: "steam_2", PlayerID: "player-2", AccountName: "account-2", Level: level(20), Ping: &ping, LocationX: &x, LocationY: &y},
 	}}}
 	db, service := rosterFixture(t, client, time.Second)
 	now := time.Date(2026, 7, 16, 8, 0, 0, 0, time.UTC)
@@ -75,7 +76,7 @@ VALUES('hash','1','steam_1','old-player','Old Alpha','old-account','player','act
 	}
 
 	first := service.Players(context.Background())
-	if !first.Available || !first.CurrentStatusKnown || first.Cached || first.Stale || first.Counts.Total != 2 || *first.Counts.CurrentOnline != 2 {
+	if !first.Available || !first.CurrentStatusKnown || first.Cached || first.Stale || first.Counts.Total != 2 || *first.Counts.CurrentOnline != 2 || first.Players[1].Ping == nil || first.Players[1].Position == nil {
 		t.Fatalf("first=%+v", first)
 	}
 	var character, playerID, account, lastSeen string
@@ -91,7 +92,7 @@ VALUES('hash','1','steam_1','old-player','Old Alpha','old-account','player','act
 		{Name: "Alpha Renamed", UserID: "steam_1", PlayerID: "player-1-new", AccountName: "account-new", Level: level(55)},
 	}}, nil)
 	second := service.Players(context.Background())
-	if len(second.Players) != 2 || second.Players[0].Name != "Alpha Renamed" || second.Players[0].Level != 55 || second.Players[1].Name != "Beta" || second.Players[1].Status != StatusOffline || second.Players[1].Ping != nil || second.Players[1].Position != nil {
+	if second.Counts.Total != 2 || second.Counts.CurrentOnline == nil || *second.Counts.CurrentOnline != 1 || second.Counts.LastKnownOffline != 1 || len(second.Players) != 2 || second.Players[0].Name != "Alpha Renamed" || second.Players[0].Level != 55 || second.Players[1].Name != "Beta" || second.Players[1].Status != StatusOffline || second.Players[1].Ping != nil || second.Players[1].Position != nil {
 		t.Fatalf("second=%+v", second)
 	}
 	betaLastOnline := second.Players[1].LastOnlineAt
