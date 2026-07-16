@@ -138,3 +138,17 @@ PWA Service Worker 的 navigation fallback 排除整个 `/api/`，不会缓存 s
 - 部署后 Companion 日志未命中密码、Cookie、Authorization、Session token、OpenID/Steam 域名或 panic、fatal、迁移、外键错误；验收结束时无 Companion 已建立连接。
 - 本次仅停止并启动 `palworld-companion.service`。`palworld-server.service` 保持 PID `113468`、active 时间 `2026-07-15 09:35:34 UTC`；`palworld-pst.service` 保持 PID `107527`、active 时间 `2026-07-15 01:48:58 UTC`。未修改或重启 PalServer/PST，未触碰配置、数据库或存档，未执行 `clean-seeds`，未使用 Docker，未发生回滚。
 - 一次失败的 tar 上传在 `/tmp/palworld-companion-linux-amd64` 留下 `11236352` 字节无效残片；该文件未用于部署，也未在缺少删除授权时清理。仍需使用真实在线角色完成角色名注册与管理员审批，并在实体手机完成“安装到主屏幕”最终点击。
+
+## 2026-07-16 v0.4.0-dev 玩家持久化名册部署记录
+
+- 部署源码提交为 `f1190bb9d51b38e75205258a43ab5b95cc3fc608`，版本为 `0.4.0-dev`，构建时间为 `2026-07-16T02:35:27Z`。Linux AMD64 制品大小为 `11284664` 字节，SHA-256 为 `4dc3eab8add5a94b668c02e31881775d054401c0b0595d9012623c2d4249ac5d`；已核验上传制品保留在 `/tmp/palworld-companion-f1190bb`。
+- 更新前备份位于 `/root/palworld-companion-backup-20260716-023841`，包含旧二进制、配置和停止服务后的 `companion.db`。停服复制时源数据库 WAL/SHM 均不存在；随后对备份库进行只读核验时 SQLite 在备份目录生成了 0 字节 WAL 和 32768 字节 SHM，不代表遗漏源侧车数据。回滚方案为同时恢复旧二进制和完整 schema 4 数据库；本次未触发回滚。
+- SQLite 从 schema 4 事务迁移至 schema 5，journal mode 保持 WAL。迁移前后均为 `users=2`、`sessions=5`、`tasks=2`、`auth_flows=5`；迁移后 `player_roster=1`，`PRAGMA foreign_key_check` 为 0。`setup_completed=true` 且公开 setup 状态为 `setupRequired=false`，现有用户、Session、任务和 Setup 状态未丢失或重置。
+- 名册接口验收时 `available=true`、`currentStatusKnown=true`、`stale=false`，持久名册共 1 行；响应包含在线状态与 `lastOnlineAt`。再次重启 Companion 后 PID 从 `138933` 变为 `139046`，重启前后名册均为 1 行，随后玩家接口继续返回 HTTP 200，确认名册跨服务重启持久化。
+- 公共玩家 JSON 的键级检查未发现 SteamID、Palworld userId/playerId、accountName、IP 或内部 ID；summary 在线人数与名册 `currentOnline` 一致。自动测试覆盖上游失败、非法快照、事务回滚和 stale/SQLite 回退，确认这些路径不会把玩家错误标记离线，也不会修改最后在线或最后成功同步时间。
+- `/etc/palworld-companion/config.yaml` 未修改，部署前后 SHA-256 均为 `194a975a1e55fa0be3e6d3c5f9e1a3239abbce4dff1d8302752287b7989df58e`。确认旧的 `/tmp/palworld-companion-linux-amd64` 不是当前运行文件且未被使用后，已仅删除该无效残片。
+- Companion 服务保持 enabled、active 和 running，最终 PID 为 `139046`，active 时间为 `2026-07-16 02:40:05 UTC`，程序权限为 `root:root 0755`。health 返回 `0.4.0-dev`，system version 准确返回部署源码提交及构建时间。
+- 公网 HTTP 首页返回 301；HTTPS 首页、`/login`、`/register`、health、玩家接口、manifest、图标和 Service Worker 均返回 200。旧 Steam 路由继续返回 HTTP 410，未认证任务接口继续返回 HTTP 401。相同前端源码的 390×844 浏览器验收无横向溢出，筛选可点击，键盘焦点清晰，控制台无错误。
+- 部署后 Companion 日志未发现密码、Cookie、Authorization、Session token、OpenID 签名、Steam 域名或 panic、fatal、迁移、外键错误。生产环境未创建测试账号或填写测试密码。
+- 本次仅停止、启动和再次重启 `palworld-companion.service`。`palworld-server.service` 始终保持 PID `113468`、active 时间 `2026-07-15 09:35:34 UTC`；`palworld-pst.service` 始终保持 PID `107527`、active 时间 `2026-07-15 01:48:58 UTC`。未修改或重启 PalServer/PST，未修改 Nginx、FRP、防火墙、8212、配置或存档，未执行 `clean-seeds`，未使用 Docker。
+- 仍需真人验收：两名真实玩家同时在线与一人退出后的状态切换、最后在线时间、角色改名不产生重复身份、角色名注册及管理员审批、离线角色名登录，以及实体手机安装到主屏幕和筛选/状态徽标体验。
