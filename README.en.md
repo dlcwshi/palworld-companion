@@ -8,7 +8,7 @@
 
 Palworld Companion is a self-hosted, mobile-first PWA for Palworld players. Its Go backend accesses a strict read-only Palworld REST API allowlist, stores Companion-owned accounts and tasks in SQLite, and embeds the Vue frontend in one executable.
 
-**Current repository version: 0.4.4-dev.** This is not a v0.4.4 tag or formal release.
+**Current repository version: 0.4.5-dev.** This is not a v0.4.5 tag or formal release.
 
 ## Current capabilities
 

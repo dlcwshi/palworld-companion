@@ -8,7 +8,7 @@
 
 Palworld Companion 是自托管、手机端优先的 Palworld 玩家辅助 PWA。Go 后端通过严格的只读白名单连接 Palworld REST API，在 SQLite 中保存 Companion 自身账号和任务，并把 Vue 前端嵌入单个可执行文件。
 
-**当前仓库版本：0.4.4-dev。**不创建 v0.4.4 Tag 或正式 Release。
+**当前仓库版本：0.4.5-dev。**不创建 v0.4.5 Tag 或正式 Release。
 
 ## 当前功能
 

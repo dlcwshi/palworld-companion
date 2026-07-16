@@ -88,7 +88,6 @@ onBeforeUnmount(() => {
         <strong>{{ number(server?.onlinePlayers) }}</strong>
         <span>/ {{ number(server?.maxPlayers) }} {{ server?.onlinePlayersKnown ? '在线' : '当前在线状态未知' }}</span>
       </div>
-      <p v-if="server?.description" class="description">{{ server.description }}</p>
     </section>
 
     <div v-if="pageNotice" class="notice" :class="pageNotice.tone">{{ pageNotice.text }}</div>
