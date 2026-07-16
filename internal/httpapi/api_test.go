@@ -82,7 +82,7 @@ func newFixtureWithRosterTTL(t *testing.T, client palworld.Client, rosterTTL tim
 		"manifest.webmanifest":   &fstest.MapFile{Data: []byte(`{"name":"Companion"}`)},
 		"assets/app-deadbeef.js": &fstest.MapFile{Data: []byte("console.log('app')")},
 	}
-	return &fixture{handler: New(status, tasks.NewService(tasks.NewRepository(db.SQL())), service, BuildInfo{Name: "Palworld Companion", Version: "0.4.2-dev"}, logger, assets), db: db, logs: logs}
+	return &fixture{handler: New(status, tasks.NewService(tasks.NewRepository(db.SQL())), service, BuildInfo{Name: "Palworld Companion", Version: "0.4.3-dev"}, logger, assets), db: db, logs: logs}
 }
 func jsonRequest(method, path, body string) *http.Request {
 	return httptest.NewRequest(method, path, strings.NewReader(body))

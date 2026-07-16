@@ -8,7 +8,7 @@
 
 Palworld Companion is a self-hosted, mobile-first PWA for Palworld players. Its Go backend accesses a strict read-only Palworld REST API allowlist, stores Companion-owned accounts and tasks in SQLite, and embeds the Vue frontend in one executable.
 
-**Current repository version: 0.4.2-dev.** This is not a v0.4.1 tag or formal release.
+**Current repository version: 0.4.3-dev.** This is not a v0.4.3 tag or formal release.
 
 ## Current capabilities
 
@@ -79,11 +79,11 @@ Legacy `auth.enabled`, `public_base_url`, and `admin_steam_ids` keys remain acce
 
 ## Persistent player roster
 
-Version 0.4.2-dev stores every fully validated fresh /players snapshot in the schema 5 SQLite player_roster. The stable identity key is internal palworld_user_id; character names are display and local-login lookup values only. Public responses never include SteamID64, Palworld user/player IDs, account names, IP addresses, or database IDs.
+Version 0.4.3-dev stores every fully validated fresh /players snapshot in the schema 5 SQLite player_roster. The stable identity key is internal palworld_user_id; character names are display and local-login lookup values only. Public responses never include SteamID64, Palworld user/player IDs, account names, IP addresses, or database IDs.
 
-Only a fresh, complete, valid snapshot may change presence and advance player_roster_last_success_at. Upstream failures, malformed payloads, transaction failures, TTL hits, and SQLite fallback never mark everyone offline or extend last-online timestamps. During a failure, the persisted roster remains visible while every current status is unknown; it survives Companion restarts.
+Only a fresh, complete, valid snapshot may change presence and advance player_roster_last_success_at. Upstream failures, malformed payloads, transaction failures, TTL hits, and SQLite fallback never mark everyone offline or extend last-online timestamps. During a failure, the persisted roster remains visible while every current status is unknown; it survives Companion restarts. Version 0.4.3-dev starts failure cooldown when the upstream attempt completes, preventing queued requests from immediately repeating a slow /players timeout.
 
-Last online means the last successful snapshot in which Companion observed the identity online. This release has no online-duration statistics, history charts, or always-on background poller. Existing home, summary and player requests trigger refreshes, while character registration forces a fresh request and never binds from the persisted roster.
+Last online means the last successful snapshot in which Companion observed the identity online. This release has no online-duration statistics, history charts, or always-on background poller. Existing home, summary and player requests trigger refreshes, while character registration still forces a real-time /players request and never binds from normal TTL cache, failure backoff, or the persisted roster.
 
 The home page shows the complete persistent roster by default and filters the existing response locally by All, Online, or Offline. Unknown presence returns to All and keeps every historical player visible. Ordinary TTL hits update normally without exposing cache implementation labels.
 

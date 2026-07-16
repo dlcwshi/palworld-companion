@@ -1,6 +1,6 @@
 # 架构
 
-Palworld Companion 0.4.2-dev 是单体、自托管应用。Vue PWA 嵌入纯 Go 二进制；账号、Session 和任务属于 Companion 自身 SQLite，浏览器不会接触 Palworld REST API 凭据。
+Palworld Companion 0.4.3-dev 是单体、自托管应用。Vue PWA 嵌入纯 Go 二进制；账号、Session 和任务属于 Companion 自身 SQLite，浏览器不会接触 Palworld REST API 凭据。
 
 ```mermaid
 flowchart LR
@@ -42,7 +42,7 @@ flowchart LR
 
 schema 5 新增 player_roster，以 palworld_user_id 为唯一稳定身份，非空 palworld_player_id 也受部分唯一索引保护。表只保存角色名、等级、上次已知在线状态、首次发现、最后在线和更新时间；不保存 ping、坐标、accountName、IP 或原始响应。迁移只从已绑定且身份与角色名非空的 users 回填，空 playerId 转为 NULL，并且不会伪造 player_roster_last_success_at。
 
-internal/roster 在事务外请求并校验整份新鲜快照，在同一 SQLite 事务中更新名册、绑定用户和最后成功时间。普通请求用互斥锁复用约 3 秒的成功缓存；缓存命中不写库。上游或校验失败时只读 SQLite，公共状态统一为 unknown，保留 lastKnownStatus，不修改 is_online 或 last_online_at。summary 和玩家接口共享同一 roster Service，角色名注册强制绕过 TTL 且禁止 stale/SQLite 身份匹配。
+internal/roster 在事务外请求并校验整份新鲜快照，在同一 SQLite 事务中更新名册、绑定用户和最后成功时间。普通请求用互斥锁复用约 3 秒的成功缓存；缓存命中不写库。失败冷却从上游尝试完成时开始，等待同一次慢失败的并发请求在 TTL 内复用失败状态，冷却结束后仍只允许一次恢复刷新。上游或校验失败时只读 SQLite，公共状态统一为 unknown，保留 lastKnownStatus，不修改 is_online 或 last_online_at。summary 和玩家接口共享同一 roster Service，角色名注册强制绕过 TTL 且禁止 stale/SQLite 身份匹配。
 
 本版本没有后台常驻轮询；首页、summary、玩家接口和角色名注册触发更新。因此最后在线是 Companion 最后一次在完整成功快照中发现玩家在线的时间，不是精确在线时长。
 

@@ -54,14 +54,10 @@ func (s *Service) Players(ctx context.Context) Response {
 	}
 	snapshot, err := s.loadFresh(ctx)
 	if err != nil {
-		code := PublicUpstreamError
-		if errors.Is(err, ErrPersistence) {
-			code = PublicRosterError
-		}
-		s.failureAt, s.failureCode = now, code
+		code := s.finishRefresh(err)
 		return s.responseFromState(ctx, false, true, false, palworld.Players{}, &code)
 	}
-	s.failureAt, s.failureCode = time.Time{}, ""
+	s.finishRefresh(nil)
 	return s.responseFromState(ctx, false, false, true, snapshot, nil)
 }
 
@@ -69,10 +65,21 @@ func (s *Service) FreshPlayers(ctx context.Context) (palworld.Players, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snapshot, err := s.loadFresh(ctx)
+	s.finishRefresh(err)
+	return snapshot, err
+}
+
+func (s *Service) finishRefresh(err error) string {
 	if err == nil {
 		s.failureAt, s.failureCode = time.Time{}, ""
+		return ""
 	}
-	return snapshot, err
+	code := PublicUpstreamError
+	if errors.Is(err, ErrPersistence) {
+		code = PublicRosterError
+	}
+	s.failureAt, s.failureCode = s.now().UTC(), code
+	return code
 }
 
 func (s *Service) loadFresh(ctx context.Context) (palworld.Players, error) {

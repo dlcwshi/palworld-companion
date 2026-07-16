@@ -8,7 +8,7 @@
 
 Palworld Companion 是自托管、手机端优先的 Palworld 玩家辅助 PWA。Go 后端通过严格的只读白名单连接 Palworld REST API，在 SQLite 中保存 Companion 自身账号和任务，并把 Vue 前端嵌入单个可执行文件。
 
-**当前仓库版本：0.4.2-dev。**不创建 v0.4.1 Tag 或正式 Release。
+**当前仓库版本：0.4.3-dev。**不创建 v0.4.3 Tag 或正式 Release。
 
 ## 当前功能
 
@@ -75,15 +75,15 @@ go run ./cmd/companion --config deploy/config.example.yaml
 
 打开 <http://127.0.0.1:8091>。示例配置使用 Mock 模式和 `./data/companion.db`。
 
-配置中的 `auth.enabled`、`public_base_url`、`admin_steam_ids` 仅为旧版本兼容字段，0.4.2-dev 会读取但不会用于 Steam 认证。仍使用 `auth.session_ttl` 控制 Session 有效期。
+配置中的 `auth.enabled`、`public_base_url`、`admin_steam_ids` 仅为旧版本兼容字段，0.4.3-dev 会读取但不会用于 Steam 认证。仍使用 `auth.session_ttl` 控制 Session 有效期。
 
 ## 持久化玩家名册
 
-0.4.2-dev 将完整校验后的新鲜 /players 成功快照写入 SQLite schema 5 的 player_roster。稳定身份键是内部 palworld_user_id，角色名只用于显示和本地登录查找；公共 API 不返回 SteamID64、Palworld userId/playerId、accountName、IP 或数据库 ID。
+0.4.3-dev 将完整校验后的新鲜 /players 成功快照写入 SQLite schema 5 的 player_roster。稳定身份键是内部 palworld_user_id，角色名只用于显示和本地登录查找；公共 API 不返回 SteamID64、Palworld userId/playerId、accountName、IP 或数据库 ID。
 
-只有新鲜、完整且有效的成功快照会改变在线状态并更新 player_roster_last_success_at。API 请求失败、格式异常、事务失败、TTL 命中或 SQLite 回退都不会把玩家标记离线，也不会延长最后在线时间。故障期间历史名册继续显示，但所有当前状态统一为“状态未知”；服务重启后历史名册仍可恢复。
+只有新鲜、完整且有效的成功快照会改变在线状态并更新 player_roster_last_success_at。API 请求失败、格式异常、事务失败、TTL 命中或 SQLite 回退都不会把玩家标记离线，也不会延长最后在线时间。故障期间历史名册继续显示，但所有当前状态统一为“状态未知”；服务重启后历史名册仍可恢复。0.4.3-dev 将故障冷却起点固定为上游失败完成时，防止慢超时后排队的并发请求立即重复访问 /players。
 
-“最后在线”表示 Companion 最后一次通过成功快照发现角色在线的时间。本版本没有在线时长统计、历史图表或后台常驻轮询；名册由首页、summary、玩家接口以及角色名注册的强制新鲜请求触发。角色名注册仍要求角色提交时实时在线，不能使用持久化名册代替身份确认。
+“最后在线”表示 Companion 最后一次通过成功快照发现角色在线的时间。本版本没有在线时长统计、历史图表或后台常驻轮询；名册由首页、summary、玩家接口以及角色名注册的强制新鲜请求触发。角色名注册仍要求角色提交时实时在线，继续强制使用实时 /players，不能使用普通 TTL 缓存、失败退避或持久化名册代替身份确认。
 
 首页玩家区默认展示完整持久化名册，并在“全部 / 在线 / 离线”之间本地筛选；状态不可确认时自动回到全部并保留历史玩家。普通 TTL 命中只更新时间，不向玩家显示缓存实现细节。
 

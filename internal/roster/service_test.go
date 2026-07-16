@@ -15,11 +15,13 @@ import (
 )
 
 type testClient struct {
-	mu       sync.Mutex
-	snapshot palworld.Players
-	err      error
-	calls    int
-	wait     chan struct{}
+	mu           sync.Mutex
+	snapshot     palworld.Players
+	err          error
+	calls        int
+	wait         chan struct{}
+	started      chan struct{}
+	beforeReturn func()
 }
 
 func (c *testClient) GetInfo(context.Context) (palworld.Info, error) { return palworld.Info{}, c.err }
@@ -30,9 +32,19 @@ func (c *testClient) GetPlayers(context.Context) (palworld.Players, error) {
 	c.mu.Lock()
 	c.calls++
 	snapshot, err, wait := c.snapshot, c.err, c.wait
+	started, beforeReturn := c.started, c.beforeReturn
 	c.mu.Unlock()
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	}
 	if wait != nil {
 		<-wait
+	}
+	if beforeReturn != nil {
+		beforeReturn()
 	}
 	return snapshot, err
 }
@@ -47,6 +59,29 @@ func (c *testClient) callCount() int {
 	return c.calls
 }
 
+func (c *testClient) configure(snapshot palworld.Players, err error, wait, started chan struct{}, beforeReturn func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.snapshot, c.err = snapshot, err
+	c.wait, c.started, c.beforeReturn = wait, started, beforeReturn
+}
+
+type testClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newTestClock(now time.Time) *testClock { return &testClock{now: now} }
+func (c *testClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+func (c *testClock) Advance(duration time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(duration)
+}
 func rosterFixture(t *testing.T, client palworld.Client, ttl time.Duration) (*storage.DB, *Service) {
 	t.Helper()
 	db, err := storage.Open(filepath.Join(t.TempDir(), "roster.db"))
@@ -190,6 +225,189 @@ func TestTransactionFailureRollsBackEveryRosterField(t *testing.T) {
 	}
 }
 
+func TestSlowFailureBackoffStartsAtCompletionAndRecoveryIsSingleflight(t *testing.T) {
+	const callers = 4
+	ttl := 3 * time.Second
+	clock := newTestClock(time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC))
+	releaseFailure := make(chan struct{})
+	failureStarted := make(chan struct{}, 1)
+	client := &testClient{}
+	client.configure(palworld.Players{}, errors.New("slow failure"), releaseFailure, failureStarted, func() {
+		clock.Advance(4 * time.Second)
+	})
+	db, service := rosterFixture(t, client, ttl)
+	service.now = clock.Now
+
+	start := make(chan struct{})
+	results := make(chan Response, callers)
+	var group sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			results <- service.Players(context.Background())
+		}()
+	}
+	close(start)
+	<-failureStarted
+	close(releaseFailure)
+	group.Wait()
+	close(results)
+
+	for result := range results {
+		if result.CurrentStatusKnown || !result.Stale {
+			t.Fatalf("slow failure result=%+v", result)
+		}
+	}
+	if client.callCount() != 1 {
+		t.Fatalf("slow failure upstream calls=%d", client.callCount())
+	}
+
+	clock.Advance(ttl - time.Nanosecond)
+	withinCooldown := service.Players(context.Background())
+	if withinCooldown.CurrentStatusKnown || !withinCooldown.Stale || client.callCount() != 1 {
+		t.Fatalf("within cooldown=%+v calls=%d", withinCooldown, client.callCount())
+	}
+
+	releaseRecovery := make(chan struct{})
+	recoveryStarted := make(chan struct{}, 1)
+	client.configure(palworld.Players{Players: []palworld.Player{{Name: "Recovered", UserID: "steam_1"}}}, nil, releaseRecovery, recoveryStarted, nil)
+	clock.Advance(2 * time.Nanosecond)
+
+	start = make(chan struct{})
+	results = make(chan Response, callers)
+	group = sync.WaitGroup{}
+	for i := 0; i < callers; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			results <- service.Players(context.Background())
+		}()
+	}
+	close(start)
+	<-recoveryStarted
+	close(releaseRecovery)
+	group.Wait()
+	close(results)
+
+	for result := range results {
+		if !result.CurrentStatusKnown || result.Stale || len(result.Players) != 1 || result.Players[0].Name != "Recovered" {
+			t.Fatalf("recovery result=%+v", result)
+		}
+	}
+	if client.callCount() != 2 {
+		t.Fatalf("recovery upstream calls=%d", client.callCount())
+	}
+	if !service.failureAt.IsZero() || service.failureCode != "" {
+		t.Fatalf("failure state not cleared: at=%v code=%q", service.failureAt, service.failureCode)
+	}
+	state, lastSuccess, err := NewRepository(db.SQL()).State(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state) != 1 || lastSuccess == nil || !lastSuccess.Equal(clock.Now()) {
+		t.Fatalf("state=%+v lastSuccess=%v now=%v", state, lastSuccess, clock.Now())
+	}
+}
+
+func TestSlowFailurePreservesPersistentRosterState(t *testing.T) {
+	ttl := 3 * time.Second
+	clock := newTestClock(time.Date(2026, 7, 16, 13, 0, 0, 0, time.UTC))
+	ping, x, y := 35.0, 10.5, -20.5
+	client := &testClient{snapshot: palworld.Players{Players: []palworld.Player{{
+		Name: "Known", UserID: "steam_1", Ping: &ping, LocationX: &x, LocationY: &y,
+	}}}}
+	db, service := rosterFixture(t, client, ttl)
+	service.now = clock.Now
+	first := service.Players(context.Background())
+	if !first.CurrentStatusKnown || first.Players[0].Ping == nil || first.Players[0].Position == nil {
+		t.Fatalf("first=%+v", first)
+	}
+
+	var beforeOnline, beforeCount int
+	var beforeLastOnline, beforeLastSuccess string
+	if err := db.SQL().QueryRow("SELECT is_online,last_online_at FROM player_roster WHERE palworld_user_id='steam_1'").Scan(&beforeOnline, &beforeLastOnline); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SQL().QueryRow("SELECT count(*) FROM player_roster").Scan(&beforeCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SQL().QueryRow("SELECT value FROM system_settings WHERE key=?", lastSuccessSetting).Scan(&beforeLastSuccess); err != nil {
+		t.Fatal(err)
+	}
+
+	clock.Advance(ttl)
+	client.configure(palworld.Players{}, errors.New("slow failure"), nil, nil, func() {
+		clock.Advance(4 * time.Second)
+	})
+	failed := service.Players(context.Background())
+	if failed.CurrentStatusKnown || !failed.Stale || len(failed.Players) != 1 || failed.Players[0].Status != StatusUnknown || failed.Players[0].Ping != nil || failed.Players[0].Position != nil {
+		t.Fatalf("failed=%+v", failed)
+	}
+
+	var afterOnline, afterCount int
+	var afterLastOnline, afterLastSuccess string
+	if err := db.SQL().QueryRow("SELECT is_online,last_online_at FROM player_roster WHERE palworld_user_id='steam_1'").Scan(&afterOnline, &afterLastOnline); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SQL().QueryRow("SELECT count(*) FROM player_roster").Scan(&afterCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SQL().QueryRow("SELECT value FROM system_settings WHERE key=?", lastSuccessSetting).Scan(&afterLastSuccess); err != nil {
+		t.Fatal(err)
+	}
+	if afterOnline != beforeOnline || afterLastOnline != beforeLastOnline || afterLastSuccess != beforeLastSuccess || afterCount != beforeCount {
+		t.Fatalf("persistent state changed: before=%d %q %q %d after=%d %q %q %d", beforeOnline, beforeLastOnline, beforeLastSuccess, beforeCount, afterOnline, afterLastOnline, afterLastSuccess, afterCount)
+	}
+
+	clock.Advance(ttl - time.Nanosecond)
+	cooled := service.Players(context.Background())
+	if cooled.CurrentStatusKnown || !cooled.Stale || client.callCount() != 2 {
+		t.Fatalf("cooled=%+v calls=%d", cooled, client.callCount())
+	}
+}
+
+func TestFreshPlayersAlwaysCallsUpstreamAndClearsFailureOnSuccess(t *testing.T) {
+	clock := newTestClock(time.Date(2026, 7, 16, 14, 0, 0, 0, time.UTC))
+	client := &testClient{snapshot: palworld.Players{Players: []palworld.Player{{Name: "Cached", UserID: "steam_1"}}}}
+	_, service := rosterFixture(t, client, time.Minute)
+	service.now = clock.Now
+	if result := service.Players(context.Background()); !result.CurrentStatusKnown {
+		t.Fatalf("initial=%+v", result)
+	}
+
+	client.configure(palworld.Players{}, errors.New("fresh failure"), nil, nil, nil)
+	for i := 0; i < 2; i++ {
+		if _, err := service.FreshPlayers(context.Background()); err == nil || err.Error() != "fresh failure" {
+			t.Fatalf("fresh failure %d: %v", i, err)
+		}
+	}
+	if client.callCount() != 3 {
+		t.Fatalf("fresh calls after failures=%d", client.callCount())
+	}
+	if service.failureAt.IsZero() || service.failureCode != PublicUpstreamError {
+		t.Fatalf("fresh failure state: at=%v code=%q", service.failureAt, service.failureCode)
+	}
+
+	clock.Advance(time.Second)
+	client.configure(palworld.Players{Players: []palworld.Player{{Name: "Fresh", UserID: "steam_2"}}}, nil, nil, nil, nil)
+	snapshot, err := service.FreshPlayers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.callCount() != 4 || len(snapshot.Players) != 1 || snapshot.Players[0].Name != "Fresh" {
+		t.Fatalf("fresh snapshot=%+v calls=%d", snapshot, client.callCount())
+	}
+	if !service.failureAt.IsZero() || service.failureCode != "" {
+		t.Fatalf("fresh success did not clear failure: at=%v code=%q", service.failureAt, service.failureCode)
+	}
+	cached := service.Players(context.Background())
+	if !cached.Cached || !cached.CurrentStatusKnown || len(cached.Players) != 2 || client.callCount() != 4 {
+		t.Fatalf("cached after fresh=%+v calls=%d", cached, client.callCount())
+	}
+}
 func TestConcurrentRefreshSingleflightAndForcedFreshNoFallback(t *testing.T) {
 	release := make(chan struct{})
 	client := &testClient{

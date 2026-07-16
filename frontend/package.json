@@ -1,7 +1,7 @@
 {
   "name": "palworld-companion-frontend",
   "private": true,
-  "version": "0.4.2-dev",
+  "version": "0.4.3-dev",
   "type": "module",
   "scripts": {
     "dev": "vite",
