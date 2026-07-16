@@ -8,7 +8,7 @@
 
 Palworld Companion 是自托管、手机端优先的 Palworld 玩家辅助 PWA。Go 后端通过严格的只读白名单连接 Palworld REST API，在 SQLite 中保存 Companion 自身账号和任务，并把 Vue 前端嵌入单个可执行文件。
 
-**当前仓库版本：0.4.3-dev。**不创建 v0.4.3 Tag 或正式 Release。
+**当前仓库版本：0.4.4-dev。**不创建 v0.4.4 Tag 或正式 Release。
 
 ## 当前功能
 
@@ -75,11 +75,11 @@ go run ./cmd/companion --config deploy/config.example.yaml
 
 打开 <http://127.0.0.1:8091>。示例配置使用 Mock 模式和 `./data/companion.db`。
 
-配置中的 `auth.enabled`、`public_base_url`、`admin_steam_ids` 仅为旧版本兼容字段，0.4.3-dev 会读取但不会用于 Steam 认证。仍使用 `auth.session_ttl` 控制 Session 有效期。
+配置中的 `auth.enabled`、`public_base_url`、`admin_steam_ids` 仅为旧版本兼容字段，当前版本会读取但不会用于 Steam 认证。仍使用 `auth.session_ttl` 控制 Session 有效期。
 
 ## 持久化玩家名册
 
-0.4.3-dev 将完整校验后的新鲜 /players 成功快照写入 SQLite schema 5 的 player_roster。稳定身份键是内部 palworld_user_id，角色名只用于显示和本地登录查找；公共 API 不返回 SteamID64、Palworld userId/playerId、accountName、IP 或数据库 ID。
+当前版本将完整校验后的新鲜 /players 成功快照写入 SQLite schema 5 的 player_roster。稳定身份键是内部 palworld_user_id，角色名只用于显示和本地登录查找；公共 API 不返回 SteamID64、Palworld userId/playerId、accountName、IP 或数据库 ID。
 
 只有新鲜、完整且有效的成功快照会改变在线状态并更新 player_roster_last_success_at。API 请求失败、格式异常、事务失败、TTL 命中或 SQLite 回退都不会把玩家标记离线，也不会延长最后在线时间。故障期间历史名册继续显示，但所有当前状态统一为“状态未知”；服务重启后历史名册仍可恢复。0.4.3-dev 将故障冷却起点固定为上游失败完成时，防止慢超时后排队的并发请求立即重复访问 /players。
 
@@ -91,7 +91,7 @@ go run ./cmd/companion --config deploy/config.example.yaml
 
 生产构建先清空并生成 `web/dist`，随后校验首页 bundle、哈希资源和 Service Worker 预缓存清单，Go 构建再从同一目录嵌入资源。PWA 使用 `autoUpdate`、`skipWaiting` 和 `clientsClaim`；每次启动、恢复到前台、网络恢复及每小时都会检查更新，新 Worker 激活后由标准注册逻辑刷新一次页面。该过程不清除 Secure/HttpOnly 登录 Cookie。
 
-Manifest 固定使用 `start_url=/` 和 `scope=/`。移动端首页在 640px 以下压缩品牌、服务器状态与 2×2 指标区，保留至少 44px 触摸目标、顶部/底部安全区域和完整任务/玩家逻辑。账户页只保留账号信息、修改密码、退出和管理员入口；密码与 Cookie 技术设计继续记录在安全文档中。
+Manifest 固定使用 `start_url=/` 和 `scope=/`。移动端首页保持单行紧凑品牌、紧凑服务器状态与 2×2 指标区，统一底部 SVG 导航并保留安全区域和完整任务/玩家逻辑。账户页默认只显示账号概览与设置入口，修改密码表单按需展开，取消或离页会清空敏感输入；密码与 Cookie 技术设计继续记录在安全文档中。
 
 `index.html`、manifest 和 `sw.js` 使用 `no-cache` 重新验证，带内容哈希的 `/assets/` 使用长期 immutable 缓存。Service Worker 不预缓存 `/api/`，也没有 API runtime cache。
 

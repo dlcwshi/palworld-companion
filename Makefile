@@ -1,6 +1,6 @@
 GO ?= go
 NPM ?= npm
-VERSION ?= 0.4.3-dev
+VERSION ?= 0.4.4-dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null)
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS = -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildTime=$(BUILD_TIME)

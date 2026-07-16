@@ -1,6 +1,6 @@
 # 架构
 
-Palworld Companion 0.4.3-dev 是单体、自托管应用。Vue PWA 嵌入纯 Go 二进制；账号、Session 和任务属于 Companion 自身 SQLite，浏览器不会接触 Palworld REST API 凭据。
+Palworld Companion 0.4.4-dev 是单体、自托管应用。Vue PWA 嵌入纯 Go 二进制；账号、Session 和任务属于 Companion 自身 SQLite，浏览器不会接触 Palworld REST API 凭据。
 
 ```mermaid
 flowchart LR
@@ -68,4 +68,4 @@ internal/roster 在事务外请求并校验整份新鲜快照，在同一 SQLite
 
 PWA 只注册一个 Service Worker，采用 `autoUpdate`、`skipWaiting` 和 `clientsClaim`。注册时、窗口恢复可见、网络恢复和每小时时检查更新；新 Worker 激活后标准注册逻辑只刷新一次，不清除登录 Cookie。navigation fallback 拒绝整个 `/api/`，runtime cache 为空，没有认证、初始化、注册、任务或管理员响应进入缓存。Go 静态处理器对 index、manifest 和 Service Worker 使用 `no-cache`，对哈希 assets 使用 immutable 长缓存。
 
-Manifest 的 `start_url` 与 `scope` 均为 `/`，但路由守卫仍独立处理 Android 恢复最后页面的情况。640px 以下首页通过组件级响应式样式压缩单行品牌标题、44px 刷新按钮、服务器状态卡和 2×2 指标卡；桌面布局保持宽松。账户页不再渲染密码算法、Cookie 属性或 Token 哈希说明，完整安全模型继续以 `docs/security.md` 为准。
+Manifest 的 `start_url` 与 `scope` 均为 `/`，但路由守卫仍独立处理 Android 恢复最后页面的情况。640px 以下首页保持单行品牌、44px 刷新按钮、紧凑服务器卡和 2×2 指标卡；底部导航使用无外部依赖的统一内联 SVG，并保留 safe-area。账户页默认只渲染账号概览和设置操作，密码表单按需挂载，取消、成功或离页会清空敏感输入；完整安全模型继续以 `docs/security.md` 为准。

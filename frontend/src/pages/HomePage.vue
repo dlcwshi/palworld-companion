@@ -6,6 +6,7 @@ import { useServerStore } from '@/stores/server'
 import { useTaskStore } from '@/stores/tasks'
 import { useAuthStore } from '@/stores/auth'
 import { groupHomeTasks } from '@/utils/homeTasks'
+import { APP_VERSION_LABEL } from '@/version'
 
 const store = useServerStore()
 const taskStore = useTaskStore()
@@ -73,7 +74,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="home-page">
     <header class="hero-header">
-      <div class="hero-brand"><p class="eyebrow">SELF-HOSTED · V0.4.3 DEV</p><h1><span>Palworld</span><br class="title-break" /><em>Companion</em></h1></div>
+      <div class="hero-brand"><p class="eyebrow">SELF-HOSTED · {{ APP_VERSION_LABEL }}</p><h1><span>Palworld</span> <em>Companion</em></h1></div>
       <button class="refresh-button" type="button" :disabled="store.refreshing" aria-label="刷新服务器状态" @click="refreshHome"><span :class="{ spinning: store.refreshing }">↻</span></button>
     </header>
 
@@ -82,15 +83,12 @@ onBeforeUnmount(() => {
         <span class="status-badge" :class="status.tone"><i />{{ status.label }}</span>
         <span class="server-version">{{ server?.version ?? '版本未知' }}</span>
       </div>
-      <div class="server-title">
-        <div class="signal-orbit"><span>●</span></div>
-        <div><p>当前服务器</p><h2>{{ server?.name ?? '等待服务器响应' }}</h2></div>
-      </div>
-      <p v-if="server?.description" class="description">{{ server.description }}</p>
+      <div class="server-title"><h2>{{ server?.name ?? '等待服务器响应' }}</h2></div>
       <div class="online-total">
         <strong>{{ number(server?.onlinePlayers) }}</strong>
         <span>/ {{ number(server?.maxPlayers) }} {{ server?.onlinePlayersKnown ? '在线' : '当前在线状态未知' }}</span>
       </div>
+      <p v-if="server?.description" class="description">{{ server.description }}</p>
     </section>
 
     <div v-if="pageNotice" class="notice" :class="pageNotice.tone">{{ pageNotice.text }}</div>
