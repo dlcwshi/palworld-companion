@@ -5,6 +5,7 @@ frontend/dist/
 web/dist/*
 !web/dist/.gitkeep
 bin/
+obj/
 coverage/
 *.cover
 coverage.out
@@ -24,3 +25,6 @@ config.yaml
 .DS_Store
 Thumbs.db
 *.zip
+*.usmap
+oo2core*_win64.dll
+oodle-data-shared.dll

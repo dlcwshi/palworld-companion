@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palworld-companion.invalid/schema/breeding-data-v1.json",
+  "title": "Palworld Companion breeding data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["metadata", "pals", "specialCombinations"],
+  "properties": {
+    "metadata": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "gameVersion", "steamBuildId", "generatedAt", "generatorVersion", "sourceHash"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "gameVersion": { "type": "string", "minLength": 1 },
+        "steamBuildId": { "type": "string", "pattern": "^[0-9]+$" },
+        "generatedAt": { "type": "string", "format": "date-time", "pattern": "Z$" },
+        "generatorVersion": { "type": "string", "minLength": 1 },
+        "sourceHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "pals": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/pal" } },
+    "specialCombinations": { "type": "array", "items": { "$ref": "#/$defs/specialCombination" } }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9_]+$" },
+    "gender": { "enum": ["any", "male", "female"] },
+    "pal": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "dexNo", "nameZh", "nameEn", "breedingPower", "breedingOrder", "normalBreedingResult"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "dexNo": { "type": "integer", "minimum": 1 },
+        "dexSuffix": { "type": "string", "pattern": "^[A-Za-z0-9]+$" },
+        "nameZh": { "type": "string", "minLength": 1 },
+        "nameEn": { "type": "string", "minLength": 1 },
+        "breedingPower": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "breedingOrder": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "normalBreedingResult": { "enum": ["eligible", "specialOnly", "excluded"] }
+      }
+    },
+    "specialCombination": {
+      "type": "object", "additionalProperties": false,
+      "required": ["parentA", "parentAGender", "parentB", "parentBGender", "child"],
+      "properties": {
+        "parentA": { "$ref": "#/$defs/id" },
+        "parentAGender": { "$ref": "#/$defs/gender" },
+        "parentB": { "$ref": "#/$defs/id" },
+        "parentBGender": { "$ref": "#/$defs/gender" },
+        "child": { "$ref": "#/$defs/id" }
+      }
+    }
+  }
+}
