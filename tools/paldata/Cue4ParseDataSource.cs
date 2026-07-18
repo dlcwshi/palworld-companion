@@ -73,10 +73,10 @@ public sealed class Cue4ParseDataSource(string gameDirectory, string? usmapPath,
     private static UDataTable LoadTable(DefaultFileProvider provider, string packagePath) =>
         provider.LoadPackageObject<UDataTable>(packagePath + "." + packagePath[(packagePath.LastIndexOf('/') + 1)..]);
 
-    private static string ReadGameVersion(byte[] defaultGameBytes)
+    public static string ReadGameVersion(byte[] defaultGameBytes)
     {
         var text = Encoding.UTF8.GetString(defaultGameBytes);
-        var match = Regex.Match(text, "(?m)^ProjectVersion\\s*=\\s*([^\\r\\n]+)$", RegexOptions.CultureInvariant);
+        var match = Regex.Match(text, "(?m)^ProjectVersion[ \\t]*=[ \\t]*([^\\r\\n]+)", RegexOptions.CultureInvariant);
         if (!match.Success || string.IsNullOrWhiteSpace(match.Groups[1].Value))
             throw new ExtractionException("Pal/Config/DefaultGame.ini does not contain a non-empty ProjectVersion.");
         return match.Groups[1].Value.Trim();

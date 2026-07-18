@@ -21,6 +21,13 @@ public sealed class PalDataTests
     }
 
     [Fact]
+    public void GameVersionParsesFromCrLfDefaultGameIni()
+    {
+        var bytes = Encoding.UTF8.GetBytes("[/Script/EngineSettings.GeneralProjectSettings]\r\nProjectVersion=1.0.1.100619\r\nCopyrightNotice=Pocketpair\r\n");
+        Assert.Equal("1.0.1.100619", Cue4ParseDataSource.ReadGameVersion(bytes));
+    }
+
+    [Fact]
     public async Task CliHelpAndInputFailuresReturnDocumentedExitCodes()
     {
         var output = new StringWriter();
